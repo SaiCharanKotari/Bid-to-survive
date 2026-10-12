@@ -27,6 +27,7 @@ local Executioner = GameplayArea:FindFirstChild("Executioner")
 
 -- State Variables
 local CurrentRound = 0
+local CurrentRoundSession = 0
 local CurrentPhase = "Intermission"
 local PhaseTimer = 0
 local CurrentRarity = GameConfig.HammerRarities.Common
@@ -80,10 +81,13 @@ local function BroadcastState(phaseName, duration, extra)
     CurrentPhase = phaseName
     PhaseTimer = duration or 0
     local livingCount = #GetLivingPlayers()
+    local deadline = os.clock() + (duration or 0)
+    
     print(string.format("[ROUND MANAGER] Phase: %s | Round: %d | Duration: %ds | Living: %d", phaseName, CurrentRound, PhaseTimer, livingCount))
     StateChanged:FireAllClients({
         Phase = CurrentPhase,
         Duration = PhaseTimer,
+        Deadline = deadline,
         Round = CurrentRound,
         Rarity = CurrentRarity,
         LivingCount = livingCount,
@@ -122,7 +126,7 @@ local function TeleportCharacter(char, targetPos)
         hrp.AssemblyAngularVelocity = Vector3.zero
         char:PivotTo(CFrame.new(targetPos))
         task.wait(0.05)
-        char:PivotTo(CFrame.new(targetPos)) -- Double call to guarantee physics synchronization
+        char:PivotTo(CFrame.new(targetPos)) -- Physics sync
     end
 end
 
@@ -139,7 +143,6 @@ local function TeleportToArena(player)
     local char = player.Character
     if not char then return end
     local wPos = Walkway.Position
-    -- Place across 140x140 walkway
     local rx = math.random(-45, 45)
     local rz = math.random(-35, 35)
     local targetPos = Vector3.new(wPos.X + rx, wPos.Y + 3.5, wPos.Z + rz)
@@ -147,7 +150,7 @@ local function TeleportToArena(player)
 end
 
 --------------------------------------------------------------------------------
--- BOT CREATION (FOR VISIBLE COMPANIONS IN SOLO/SMALL TESTING)
+-- BOT CREATION
 --------------------------------------------------------------------------------
 
 local function CleanupBots()
@@ -176,14 +179,12 @@ local function CreateBotDummy(name, id, startPos)
     
     botModel.Name = name
     
-    -- Strip dummy scripts/tools
     for _, c in ipairs(botModel:GetDescendants()) do
         if c:IsA("LuaSourceContainer") or c:IsA("Tool") or c.Name == "PlayPrompt" then
             c:Destroy()
         end
     end
     
-    -- Give bot distinct color shirt/body
     local bodyColors = botModel:FindFirstChildOfClass("BodyColors")
     if bodyColors then
         bodyColors.TorsoColor3 = Color3.fromRGB(math.random(50, 200), math.random(50, 200), math.random(50, 200))
@@ -381,7 +382,6 @@ local function InitMatch()
     PlayerData = {}
     ExposedPlayerId = nil
     
-    -- Setup real players
     for _, player in ipairs(Players:GetPlayers()) do
         PlayerData[player.UserId] = {
             UserId = player.UserId,
@@ -396,7 +396,6 @@ local function InitMatch()
         }
     end
     
-    -- Setup bots if testing with fewer than 4 players
     local totalReal = #Players:GetPlayers()
     if totalReal < 4 then
         SetupCompanionBots(4)
@@ -406,10 +405,15 @@ local function InitMatch()
     ClearSafeTiles()
 end
 
-local function RunMatch()
+local function RunMatch(session)
     InitMatch()
     
     while MatchActive do
+        if session ~= CurrentRoundSession then
+            print("[ROUND] Obsolete session cancelled.")
+            break
+        end
+        
         CurrentRound = CurrentRound + 1
         local living = GetLivingPlayers()
         
@@ -432,17 +436,20 @@ local function RunMatch()
             break
         end
         
-        -- Roll Rarity
+        -- Roll Server-Authoritative Rarity
         CurrentRarity = GameConfig.RollRarity()
         
         ------------------------------------------------------------------------
-        -- PHASE 1: SPAWN / ROUND START
+        -- PHASE 1: SPAWN / HAMMER ROULETTE REVEAL
         ------------------------------------------------------------------------
-        print("[ROUND MANAGER] Teleporting players to arena for Round " .. CurrentRound)
+        local spawnDuration = GameConfig.SpawnPhaseTime or 8.0
+        print(string.format("[ROUND] HammerReveal START duration=%.1f", spawnDuration))
+        local p1Start = os.clock()
+        
         for _, p in ipairs(GetLivingRealPlayers()) do
             TeleportToArena(p)
         end
-        -- Reset bots to arena
+        
         local wPos = Walkway.Position
         for i, b in ipairs(ActiveBots) do
             if b.IsAlive and b.Character then
@@ -450,8 +457,14 @@ local function RunMatch()
             end
         end
         
-        BroadcastState("Phase1_Spawn", 3, { Round = CurrentRound, Rarity = CurrentRarity, RouletteDuration = GameConfig.RouletteDuration or 3.2 })
-        task.wait(3.5)
+        BroadcastState("Phase1_Spawn", spawnDuration, {
+            Round = CurrentRound,
+            Rarity = CurrentRarity,
+            RouletteDuration = GameConfig.RouletteDuration or 6.0,
+            HoldDuration = GameConfig.RouletteHoldTime or 1.5,
+        })
+        task.wait(spawnDuration)
+        print(string.format("[ROUND] HammerReveal END elapsed=%.2f", os.clock() - p1Start))
         
         ------------------------------------------------------------------------
         -- PHASE 2: ANONYMOUS VOTE (From Round 2+ if spectators exist)
@@ -459,10 +472,13 @@ local function RunMatch()
         ExposedPlayerId = nil
         local spectators = GetSpectatorPlayers()
         if CurrentRound >= 2 and #spectators > 0 and #living >= 2 then
+            local voteDuration = GameConfig.VoteTime or 7.0
+            print(string.format("[ROUND] AnonymousVote START duration=%.1f", voteDuration))
+            local p2Start = os.clock()
             for _, d in pairs(PlayerData) do d.Votes = 0 end
-            BroadcastState("Phase2_Vote", GameConfig.VoteTime, { Candidates = living })
-            PromptVote:FireAllClients({ Duration = GameConfig.VoteTime, Candidates = living })
-            task.wait(GameConfig.VoteTime)
+            BroadcastState("Phase2_Vote", voteDuration, { Candidates = living })
+            PromptVote:FireAllClients({ Duration = voteDuration, Candidates = living })
+            task.wait(voteDuration)
             
             local topVotes = 0
             local targetId = nil
@@ -479,12 +495,16 @@ local function RunMatch()
             if not tie and targetId then
                 ExposedPlayerId = targetId
             end
+            print(string.format("[ROUND] AnonymousVote END elapsed=%.2f", os.clock() - p2Start))
         end
         
         ------------------------------------------------------------------------
-        -- PHASE 3: BID FOR SURVIVAL (10 Seconds)
+        -- PHASE 3: BID FOR SURVIVAL (Exactly 10 Seconds)
         ------------------------------------------------------------------------
+        local bidDuration = GameConfig.BidTime or 10.0
+        print(string.format("[ROUND] Bidding START duration=%.1f", bidDuration))
         PhaseStartTime = os.clock()
+        
         for _, d in ipairs(living) do
             d.CurrentBid = 0
             d.SubmitTime = nil
@@ -495,21 +515,28 @@ local function RunMatch()
             end
         end
         
-        BroadcastState("Phase3_Bid", GameConfig.BidTime, { ExposedPlayerId = ExposedPlayerId })
+        BroadcastState("Phase3_Bid", bidDuration, { ExposedPlayerId = ExposedPlayerId })
         PromptBid:FireAllClients({
-            Duration = GameConfig.BidTime,
+            Duration = bidDuration,
             ExposedPlayer = ExposedPlayerId and PlayerData[ExposedPlayerId] and PlayerData[ExposedPlayerId].Name or nil
         })
-        task.wait(GameConfig.BidTime)
+        
+        -- Strictly enforce the full 10-second duration even if all players bid early!
+        task.wait(bidDuration)
+        print(string.format("[ROUND] Bidding END elapsed=%.2f", os.clock() - PhaseStartTime))
         
         ------------------------------------------------------------------------
-        -- PHASE 4: REVEAL THE RANKINGS (5 Seconds)
+        -- PHASE 4: REVEAL THE RANKINGS (Exactly 5 Seconds)
         ------------------------------------------------------------------------
+        local revealDuration = GameConfig.RevealRankingsTime or 5.0
+        print(string.format("[ROUND] Rankings START duration=%.1f", revealDuration))
+        local p4Start = os.clock()
+        
+        -- Tie-breaker sort: Bid DESC, earliest SubmitTime ASC
         table.sort(living, function(a, b)
             if math.abs(a.CurrentBid - b.CurrentBid) > 0.001 then
                 return a.CurrentBid > b.CurrentBid
             end
-            -- Earlier submission timestamp ranks higher
             return (a.SubmitTime or 999) < (b.SubmitTime or 999)
         end)
         
@@ -535,24 +562,28 @@ local function RunMatch()
         end
         
         RankingsRevealed:FireAllClients({
-            Duration = GameConfig.RevealRankingsTime,
+            Duration = revealDuration,
             TopBidders = topBidders,
             BottomBidders = bottomBidders,
             SafeCount = safeCount
         })
-        BroadcastState("Phase4_Reveal", GameConfig.RevealRankingsTime, {
+        BroadcastState("Phase4_Reveal", revealDuration, {
             TopBidders = topBidders,
             BottomBidders = bottomBidders
         })
-        task.wait(GameConfig.RevealRankingsTime)
+        task.wait(revealDuration)
+        print(string.format("[ROUND] Rankings END elapsed=%.2f", os.clock() - p4Start))
         
         ------------------------------------------------------------------------
-        -- PHASE 5: THE SCRAMBLE (Safe Tiles appear, 9s scramble)
+        -- PHASE 5: THE SCRAMBLE (Safe Tiles appear, 9s Scramble)
         ------------------------------------------------------------------------
+        local scrambleDuration = GameConfig.ScrambleTime or 9.0
+        print(string.format("[ROUND] TileScramble START duration=%.1f", scrambleDuration))
+        local p5Start = os.clock()
+        
         local tiles = SpawnSafeTiles(safeCount)
-        BroadcastState("Phase5_Scramble", GameConfig.ScrambleTime, { SafeCount = safeCount })
+        BroadcastState("Phase5_Scramble", scrambleDuration, { SafeCount = safeCount })
         
-        -- Make top-bidding bots move toward safe tiles!
         for i, bData in ipairs(topBidders) do
             if bData.IsBot and bData.Character and tiles[i] then
                 task.spawn(function()
@@ -565,18 +596,21 @@ local function RunMatch()
             end
         end
         
-        task.wait(GameConfig.ScrambleTime)
+        task.wait(scrambleDuration)
+        print(string.format("[ROUND] TileScramble END elapsed=%.2f", os.clock() - p5Start))
         
         ------------------------------------------------------------------------
-        -- PHASE 6: HAMMER SMASH
+        -- PHASE 6: HAMMER SMASH (3 Seconds)
         ------------------------------------------------------------------------
+        print("[ROUND] HammerSmash START duration=3")
+        local p6Start = os.clock()
+        
         BroadcastState("Phase6_Smash", 3, { Rarity = CurrentRarity })
         TriggerHammerSmash(CurrentRarity)
         task.wait(1.33) -- Impact timing
         
         local dmg = math.floor((GameConfig.MaxHealth * CurrentRarity.DamagePercent) / 100)
         
-        -- Check real players
         for _, player in ipairs(GetLivingRealPlayers()) do
             local pData = PlayerData[player.UserId]
             local onSafe = IsPlayerOnSafeTile(player)
@@ -590,7 +624,6 @@ local function RunMatch()
             end
         end
         
-        -- Check bot players
         for _, bData in ipairs(living) do
             if bData.IsBot and bData.Character then
                 local hrp = bData.Character:FindFirstChild("HumanoidRootPart")
@@ -605,16 +638,19 @@ local function RunMatch()
         
         task.wait(1.5)
         ClearSafeTiles()
+        print(string.format("[ROUND] HammerSmash END elapsed=%.2f", os.clock() - p6Start))
         
         ------------------------------------------------------------------------
-        -- PHASE 7: SETTLEMENT & ELIMINATIONS
+        -- PHASE 7: SETTLEMENT & ELIMINATIONS (4 Seconds)
         ------------------------------------------------------------------------
-        -- Top half: bid deducted. Bottom half: bid refunded.
+        local settlementDuration = GameConfig.SettlementTime or 4.0
+        print(string.format("[ROUND] Settlement START duration=%.1f", settlementDuration))
+        local p7Start = os.clock()
+        
         for _, d in ipairs(topBidders) do
             d.Money = math.max(0, math.floor((d.Money - d.CurrentBid) * 100) / 100)
         end
         
-        -- Lowest bid tie-breaker elimination
         local minBid = living[#living].CurrentBid
         local lowestTieCount = 0
         for _, d in ipairs(living) do
@@ -633,7 +669,6 @@ local function RunMatch()
             end
         end
         
-        -- Health 0 eliminations
         for _, d in ipairs(living) do
             if d.Health <= 0 and d.IsAlive then
                 d.IsAlive = false
@@ -650,12 +685,13 @@ local function RunMatch()
         SyncAllStats()
         
         RoundOver:FireAllClients({
-            Duration = GameConfig.SettlementTime,
+            Duration = settlementDuration,
             Eliminations = elims,
             Round = CurrentRound
         })
-        BroadcastState("Phase7_Settlement", GameConfig.SettlementTime, { Eliminations = elims })
-        task.wait(GameConfig.SettlementTime)
+        BroadcastState("Phase7_Settlement", settlementDuration, { Eliminations = elims })
+        task.wait(settlementDuration)
+        print(string.format("[ROUND] Settlement END elapsed=%.2f", os.clock() - p7Start))
     end
 end
 
@@ -671,7 +707,7 @@ BidSubmitted.OnServerEvent:Connect(function(player, amount)
         end
         local bid = tonumber(amount)
         if not bid or bid ~= bid or bid < 0 or bid > data.Money then
-            return -- Reject non-numeric, negative, NaN or unaffordable bids
+            return -- Reject invalid, negative, NaN or unaffordable bids
         end
         bid = math.floor(bid * 100) / 100
         data.CurrentBid = bid
@@ -710,16 +746,35 @@ end)
 
 -- Main Server Lifecycle Loop
 task.spawn(function()
-    task.wait(2)
+    task.wait(1.5)
     while true do
         local count = #Players:GetPlayers()
         if count >= GameConfig.MinPlayersToStart then
-            BroadcastState("Intermission", GameConfig.IntermissionTime)
-            task.wait(GameConfig.IntermissionTime)
-            RunMatch()
+            CurrentRoundSession = CurrentRoundSession + 1
+            local session = CurrentRoundSession
+            
+            local duration = GameConfig.IntermissionTime or 5
+            print(string.format("[ROUND] LobbyCountdown START duration=%d", duration))
+            local countdownStart = os.clock()
+            
+            local cancelled = false
+            for sec = duration, 1, -1 do
+                if #Players:GetPlayers() < GameConfig.MinPlayersToStart or session ~= CurrentRoundSession then
+                    print("[ROUND] LobbyCountdown CANCELLED (players left)")
+                    cancelled = true
+                    break
+                end
+                BroadcastState("Intermission", sec)
+                task.wait(1)
+            end
+            
+            if not cancelled and session == CurrentRoundSession and #Players:GetPlayers() >= GameConfig.MinPlayersToStart then
+                print(string.format("[ROUND] LobbyCountdown END elapsed=%.2f", os.clock() - countdownStart))
+                RunMatch(session)
+            end
         else
             BroadcastState("WaitingForPlayers", 0, { Needed = GameConfig.MinPlayersToStart })
-            task.wait(2)
+            task.wait(1.5)
         end
     end
 end)

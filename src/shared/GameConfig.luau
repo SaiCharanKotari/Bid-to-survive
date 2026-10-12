@@ -5,14 +5,17 @@ GameConfig.MaxHealth = 100
 GameConfig.MinPlayersToStart = 1
 GameConfig.MaxPlayers = 10
 
-GameConfig.IntermissionTime = 5
-GameConfig.VoteTime = 7
-GameConfig.BidTime = 10
-GameConfig.RevealRankingsTime = 5
-GameConfig.ScrambleTime = 9
-GameConfig.SmashDelay = 2.5
-GameConfig.SettlementTime = 4
-GameConfig.RouletteDuration = 3.2
+-- Exact Authoritative Phase Timings
+GameConfig.IntermissionTime = 5       -- Lobby Countdown (5 full seconds)
+GameConfig.RouletteDuration = 6.0     -- Visible decelerating roulette animation
+GameConfig.RouletteHoldTime = 1.5     -- Hold revealed hammer before transition
+GameConfig.SpawnPhaseTime = 8.0       -- Total Phase 1 duration (6.0s + 1.5s + 0.5s pause)
+GameConfig.VoteTime = 7               -- Anonymous Vote (Round 2+)
+GameConfig.BidTime = 10               -- Bidding Phase (Exactly 10 seconds)
+GameConfig.RevealRankingsTime = 5     -- Leaderboard reveal (5 full seconds)
+GameConfig.ScrambleTime = 9           -- Safe tile scramble (9 seconds)
+GameConfig.SmashDelay = 2.5           -- Executioner windup
+GameConfig.SettlementTime = 4         -- Round settlement and eliminations
 
 GameConfig.HammerRarities = {
     Common = {
@@ -25,7 +28,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 1.0,
         CameraShake = 0.5,
         AssetFile = "hammer_common.png",
-        AssetId = "rbxassetid://1791823957588",
+        AssetId = "rbxassetid://105495673507189",
     },
     Uncommon = {
         Name = "Uncommon",
@@ -37,7 +40,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 0.95,
         CameraShake = 0.8,
         AssetFile = "hammer_uncommon.png",
-        AssetId = "rbxassetid://1791823992854",
+        AssetId = "rbxassetid://75800528028974",
     },
     Rare = {
         Name = "Rare",
@@ -49,7 +52,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 0.9,
         CameraShake = 1.2,
         AssetFile = "hammer_rare.png",
-        AssetId = "rbxassetid://1791824031208",
+        AssetId = "rbxassetid://130593511073820",
     },
     Legendary = {
         Name = "Legendary",
@@ -61,7 +64,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 0.85,
         CameraShake = 1.6,
         AssetFile = "hammer_legendary.png",
-        AssetId = "rbxassetid://1791824078399",
+        AssetId = "rbxassetid://97051726601714",
     },
     Mythical = {
         Name = "Mythical",
@@ -73,7 +76,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 0.75,
         CameraShake = 2.2,
         AssetFile = "hammer_mythical.png",
-        AssetId = "rbxassetid://1791824115905",
+        AssetId = "rbxassetid://130727432720621",
     }
 }
 

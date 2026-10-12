@@ -25,6 +25,7 @@ local StatsUpdated = Network:WaitForChild("StatsUpdated")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local gui = script:FindFirstAncestorWhichIsA("ScreenGui") or playerGui:WaitForChild("BidToSurviveUI")
+
 local topBanner = gui:WaitForChild("TopBanner")
 local phaseTitle = topBanner:WaitForChild("PhaseTitle")
 local timerLabel = topBanner:WaitForChild("TimerLabel")
@@ -57,14 +58,13 @@ local screenFlash = gui:WaitForChild("ScreenFlash")
 local CurrentMoney = GameConfig.StartingMoney or 20.00
 local CurrentHealth = GameConfig.MaxHealth or 100
 local IsAlive = true
-local ActiveCountdown = 0
+local CurrentPhaseDeadline = 0
 local HasSubmitted = false
 local IsRoulettePlaying = false
 
 --------------------------------------------------------------------------------
 -- 1. HUD STYLING (HEALTH BAR & MONEY BOX)
 --------------------------------------------------------------------------------
--- Remove outer grey box and borders
 statsCard.BackgroundTransparency = 1
 local oldCardStroke = statsCard:FindFirstChildOfClass("UIStroke")
 if oldCardStroke then oldCardStroke:Destroy() end
@@ -77,42 +77,42 @@ statsCard.Position = UDim2.new(0, 20, 1, -115)
 -- Compact black money box (NO coin icon, text-only balance)
 cashLabel.Size = UDim2.new(0, 140, 0, 28)
 cashLabel.Position = UDim2.new(0, 0, 0, 0)
-cashLabel.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
+cashLabel.BackgroundColor3 = Color3.fromRGB(12, 13, 17)
 cashLabel.BackgroundTransparency = 0
 cashLabel.Font = Enum.Font.GothamBold
 cashLabel.TextSize = 15
-cashLabel.TextColor3 = Color3.fromRGB(245, 245, 250)
+cashLabel.TextColor3 = Color3.fromRGB(240, 245, 255)
 cashLabel.TextXAlignment = Enum.TextXAlignment.Center
 cashLabel.Text = string.format("$%.2f", CurrentMoney)
 
 local cashCorner = cashLabel:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-cashCorner.CornerRadius = UDim.new(0, 3)
+cashCorner.CornerRadius = UDim.new(0, 4)
 cashCorner.Parent = cashLabel
 
 local cashStroke = cashLabel:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-cashStroke.Color = Color3.fromRGB(35, 35, 45)
+cashStroke.Color = Color3.fromRGB(36, 40, 52)
 cashStroke.Thickness = 1
 cashStroke.Parent = cashLabel
 
--- Noticeably taller rectangular red health bar
+-- Noticeably taller rectangular red health bar (26px)
 healthBarBg.Size = UDim2.new(0, 220, 0, 26)
 healthBarBg.Position = UDim2.new(0, 0, 0, 34)
-healthBarBg.BackgroundColor3 = Color3.fromRGB(45, 12, 16)
+healthBarBg.BackgroundColor3 = Color3.fromRGB(48, 14, 18)
 healthBarBg.BackgroundTransparency = 0
 
 local hpBgCorner = healthBarBg:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-hpBgCorner.CornerRadius = UDim.new(0, 2)
+hpBgCorner.CornerRadius = UDim.new(0, 4)
 hpBgCorner.Parent = healthBarBg
 
 local hpBgStroke = healthBarBg:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-hpBgStroke.Color = Color3.fromRGB(65, 18, 24)
+hpBgStroke.Color = Color3.fromRGB(72, 22, 28)
 hpBgStroke.Thickness = 1
 hpBgStroke.Parent = healthBarBg
 
--- Fill
-healthBarFill.BackgroundColor3 = Color3.fromRGB(220, 35, 45)
+-- Animated Fill
+healthBarFill.BackgroundColor3 = Color3.fromRGB(225, 40, 50)
 local fillCorner = healthBarFill:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-fillCorner.CornerRadius = UDim.new(0, 2)
+fillCorner.CornerRadius = UDim.new(0, 3)
 fillCorner.Parent = healthBarFill
 
 -- Centered bold white text 100 / 100
@@ -120,9 +120,9 @@ healthText.Size = UDim2.new(1, 0, 1, 0)
 healthText.Position = UDim2.new(0, 0, 0, 0)
 healthText.BackgroundTransparency = 1
 healthText.Font = Enum.Font.GothamBold
-healthText.TextSize = 14
+healthText.TextSize = 13
 healthText.TextColor3 = Color3.fromRGB(255, 255, 255)
-healthText.TextStrokeTransparency = 0.35
+healthText.TextStrokeTransparency = 0.3
 healthText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 healthText.TextXAlignment = Enum.TextXAlignment.Center
 healthText.TextYAlignment = Enum.TextYAlignment.Center
@@ -133,75 +133,74 @@ healthText.Text = string.format("%d / 100", CurrentHealth)
 roundLabel.Position = UDim2.new(0, 0, 0, 66)
 roundLabel.Size = UDim2.new(0, 220, 0, 18)
 roundLabel.TextXAlignment = Enum.TextXAlignment.Left
-roundLabel.TextColor3 = Color3.fromRGB(160, 170, 190)
+roundLabel.TextColor3 = Color3.fromRGB(150, 165, 185)
 roundLabel.Font = Enum.Font.GothamMedium
 roundLabel.TextSize = 12
 
--- Hide old static rarity badge if present
 if rarityBadge then
     rarityBadge.Visible = false
 end
 
 --------------------------------------------------------------------------------
--- 2. HAMMER ROULETTE (ONE SINGLE FLOATING ICON)
+-- 2. HAMMER ROULETTE (ONE SINGLE FLOATING ICON WITH DECELERATION)
 --------------------------------------------------------------------------------
 local rouletteContainer = gui:FindFirstChild("RouletteContainer") or Instance.new("Frame")
 rouletteContainer.Name = "RouletteContainer"
-rouletteContainer.Size = UDim2.new(0, 320, 0, 320)
-rouletteContainer.Position = UDim2.new(0.5, -160, 0.44, -160)
-rouletteContainer.BackgroundTransparency = 1 -- NO background box, pure floating
+rouletteContainer.Size = UDim2.new(0, 340, 0, 340)
+rouletteContainer.Position = UDim2.new(0.5, -170, 0.42, -170)
+rouletteContainer.BackgroundTransparency = 1
 rouletteContainer.Visible = false
-rouletteContainer.ZIndex = 25
+rouletteContainer.ZIndex = 30
 rouletteContainer.Parent = gui
 
 -- Soft neon glow halo behind hammer
 local glowHalo = rouletteContainer:FindFirstChild("GlowHalo") or Instance.new("ImageLabel")
 glowHalo.Name = "GlowHalo"
-glowHalo.Size = UDim2.new(0, 260, 0, 260)
-glowHalo.Position = UDim2.new(0.5, -130, 0, 5)
+glowHalo.Size = UDim2.new(0, 280, 0, 280)
+glowHalo.Position = UDim2.new(0.5, -140, 0, 5)
 glowHalo.BackgroundTransparency = 1
-glowHalo.Image = "rbxassetid://5028857084" -- Soft radial blur halo
-glowHalo.ImageTransparency = 0.35
-glowHalo.ZIndex = 26
+glowHalo.Image = "rbxassetid://5028857084"
+glowHalo.ImageTransparency = 0.4
+glowHalo.ZIndex = 31
 glowHalo.Parent = rouletteContainer
 
--- Centered floating hammer icon
+-- Centered floating hammer icon (Prominent, High-Res)
 local hammerIcon = rouletteContainer:FindFirstChild("HammerIcon") or Instance.new("ImageLabel")
 hammerIcon.Name = "HammerIcon"
-hammerIcon.Size = UDim2.new(0, 200, 0, 200)
-hammerIcon.Position = UDim2.new(0.5, -100, 0, 35)
+hammerIcon.Size = UDim2.new(0, 220, 0, 220)
+hammerIcon.Position = UDim2.new(0.5, -110, 0, 30)
 hammerIcon.BackgroundTransparency = 1
 hammerIcon.ScaleType = Enum.ScaleType.Fit
-hammerIcon.ZIndex = 28
+hammerIcon.ZIndex = 33
 hammerIcon.Parent = rouletteContainer
 
--- Final rarity text below hammer
+-- Rarity text below hammer
 local rarityTitle = rouletteContainer:FindFirstChild("RarityTitle") or Instance.new("TextLabel")
 rarityTitle.Name = "RarityTitle"
 rarityTitle.Size = UDim2.new(1, 0, 0, 32)
-rarityTitle.Position = UDim2.new(0, 0, 0, 240)
+rarityTitle.Position = UDim2.new(0, 0, 0, 255)
 rarityTitle.BackgroundTransparency = 1
 rarityTitle.Font = Enum.Font.GothamBlack
 rarityTitle.TextSize = 24
 rarityTitle.TextXAlignment = Enum.TextXAlignment.Center
-rarityTitle.TextStrokeTransparency = 0.3
+rarityTitle.TextStrokeTransparency = 0.25
 rarityTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-rarityTitle.ZIndex = 28
+rarityTitle.ZIndex = 33
 rarityTitle.Parent = rouletteContainer
 
 -- Damage % label
 local damageTitle = rouletteContainer:FindFirstChild("DamageTitle") or Instance.new("TextLabel")
 damageTitle.Name = "DamageTitle"
 damageTitle.Size = UDim2.new(1, 0, 0, 22)
-damageTitle.Position = UDim2.new(0, 0, 0, 274)
+damageTitle.Position = UDim2.new(0, 0, 0, 288)
 damageTitle.BackgroundTransparency = 1
 damageTitle.Font = Enum.Font.GothamBold
 damageTitle.TextSize = 16
-damageTitle.TextColor3 = Color3.fromRGB(240, 240, 255)
-damageTitle.TextStrokeTransparency = 0.4
+damageTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
+damageTitle.TextStrokeTransparency = 0.35
 damageTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 damageTitle.TextXAlignment = Enum.TextXAlignment.Center
-damageTitle.ZIndex = 28
+damageTitle.ZIndex = 33
 damageTitle.Parent = rouletteContainer
 
 local function SetHammerVisual(rarityData)
@@ -210,14 +209,13 @@ local function SetHammerVisual(rarityData)
     glowHalo.ImageColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
     rarityTitle.Text = string.format("🔨 %s HAMMER", (rarityData.Name or "COMMON"):upper())
     rarityTitle.TextColor3 = rarityData.Color or Color3.fromRGB(255, 255, 255)
-    damageTitle.Text = string.format("%d%% HAMMER DAMAGE", rarityData.DamagePercent or 30)
+    damageTitle.Text = string.format("DEALS %d%% HP DAMAGE", rarityData.DamagePercent or 30)
 end
 
 local function PlayHammerRoulette(targetRarity, totalDuration)
     if IsRoulettePlaying then return end
     IsRoulettePlaying = true
     
-    totalDuration = totalDuration or (GameConfig.RouletteDuration or 3.2)
     rouletteContainer.Visible = true
     glowHalo.ImageTransparency = 0.4
     hammerIcon.ImageTransparency = 0
@@ -225,12 +223,13 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
     damageTitle.TextTransparency = 0
     
     local rarities = GameConfig.GetRarityList()
-    local stepCount = 20
+    
+    -- Smooth 19-step deceleration sequence totaling ~5.7 seconds
+    -- Starts at 100ms (cleanly legible) and eases smoothly up to 850ms
     local delays = {
-        0.04, 0.04, 0.04, 0.05, 0.05,
-        0.06, 0.07, 0.08, 0.10, 0.12,
-        0.15, 0.19, 0.24, 0.30, 0.38,
-        0.48
+        0.10, 0.10, 0.11, 0.11, 0.12, 0.13, 0.14, 0.16,
+        0.18, 0.20, 0.23, 0.27, 0.31, 0.36, 0.42, 0.50,
+        0.60, 0.72, 0.85
     }
     
     local currentIdx = 1
@@ -239,44 +238,48 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
         local r = rarities[currentIdx]
         SetHammerVisual(r)
         
-        -- Subtle tilt and pulse
-        local tiltAngle = (i % 2 == 0) and 7 or -7
+        -- Subtle rhythmic tilt and pulse
+        local tiltAngle = (i % 2 == 0) and 4 or -4
         hammerIcon.Rotation = tiltAngle
-        TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.4), {
-            Size = UDim2.new(0, 215, 0, 215),
-            Position = UDim2.new(0.5, -107, 0, 28)
+        
+        TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 235, 0, 235),
+            Position = UDim2.new(0.5, -117, 0, 22)
         }):Play()
         
         task.wait(delay * 0.5)
-        TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.5), {
-            Size = UDim2.new(0, 200, 0, 200),
-            Position = UDim2.new(0.5, -100, 0, 35)
+        
+        TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Size = UDim2.new(0, 220, 0, 220),
+            Position = UDim2.new(0.5, -110, 0, 30)
         }):Play()
+        
         task.wait(delay * 0.5)
     end
     
-    -- Land on real server-selected target rarity
+    -- Stop EXACTLY on the server-authoritative rarity
     SetHammerVisual(targetRarity)
     hammerIcon.Rotation = 0
     
-    -- Final punch emphasis
-    TweenService:Create(hammerIcon, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 230, 0, 230),
-        Position = UDim2.new(0.5, -115, 0, 20)
+    -- Impact punch bounce
+    TweenService:Create(hammerIcon, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 260, 0, 260),
+        Position = UDim2.new(0.5, -130, 0, 10)
     }):Play()
     
-    TweenService:Create(glowHalo, TweenInfo.new(0.3), {
+    TweenService:Create(glowHalo, TweenInfo.new(0.35), {
         ImageTransparency = 0.05,
-        Size = UDim2.new(0, 300, 0, 300),
-        Position = UDim2.new(0.5, -150, 0, -15)
+        Size = UDim2.new(0, 320, 0, 320),
+        Position = UDim2.new(0.5, -160, 0, -15)
     }):Play()
     
-    task.wait(1.4)
+    -- Hold final hammer visible for 1.5 seconds
+    task.wait(1.5)
     
     -- Clean fade-out into Bidding phase
     TweenService:Create(hammerIcon, TweenInfo.new(0.4), {
         ImageTransparency = 1,
-        Size = UDim2.new(0, 180, 0, 180)
+        Size = UDim2.new(0, 190, 0, 190)
     }):Play()
     TweenService:Create(glowHalo, TweenInfo.new(0.4), { ImageTransparency = 1 }):Play()
     TweenService:Create(rarityTitle, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
@@ -288,19 +291,16 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
 end
 
 --------------------------------------------------------------------------------
--- 3. COUNTDOWN TICKER
+-- 3. FRAME-ACCURATE AUTHORITATIVE COUNTDOWN TICKER
 --------------------------------------------------------------------------------
-task.spawn(function()
-    while true do
-        if ActiveCountdown > 0 then
-            ActiveCountdown = ActiveCountdown - 1
-            local mins = math.floor(ActiveCountdown / 60)
-            local secs = ActiveCountdown % 60
-            timerLabel.Text = string.format("%02d:%02d", mins, secs)
-        else
-            timerLabel.Text = "00:00"
-        end
-        task.wait(1)
+RunService.Heartbeat:Connect(function()
+    if CurrentPhaseDeadline > 0 then
+        local remaining = math.max(0, math.ceil(CurrentPhaseDeadline - os.clock()))
+        local mins = math.floor(remaining / 60)
+        local secs = remaining % 60
+        timerLabel.Text = string.format("%02d:%02d", mins, secs)
+    else
+        timerLabel.Text = "00:00"
     end
 end)
 
@@ -313,7 +313,6 @@ StatsUpdated.OnClientEvent:Connect(function(stats)
     CurrentHealth = stats.Health or CurrentHealth
     IsAlive = (stats.IsAlive ~= nil) and stats.IsAlive or IsAlive
     
-    -- Format without coin emoji
     cashLabel.Text = string.format("$%.2f", CurrentMoney)
     
     local hpPct = math.clamp(CurrentHealth / 100, 0, 1)
@@ -322,7 +321,6 @@ StatsUpdated.OnClientEvent:Connect(function(stats)
     }):Play()
     healthText.Text = string.format("%d / 100", CurrentHealth)
     
-    -- Red screen flash on damage taken
     if CurrentHealth < oldHealth then
         screenFlash.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
         screenFlash.BackgroundTransparency = 0.45
@@ -337,17 +335,18 @@ end)
 --------------------------------------------------------------------------------
 StateChanged.OnClientEvent:Connect(function(data)
     local phase = data.Phase
-    ActiveCountdown = data.Duration or 0
     local round = data.Round or 1
     local rarity = data.Rarity
     local living = data.LivingCount or 1
     
+    CurrentPhaseDeadline = data.Deadline or (os.clock() + (data.Duration or 0))
     roundLabel.Text = string.format("ROUND %d • %d ALIVE", round, living)
     
     if phase == "Intermission" then
-        phaseTitle.Text = "INTERMISSION"
+        topBanner.Visible = true
+        phaseTitle.Text = "LOBBY COUNTDOWN"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
-        infoLabel.Text = "Teleporting to arena shortly..."
+        infoLabel.Text = "Match starting shortly... Preparing arena"
         biddingModal.Visible = false
         rankingsModal.Visible = false
         voteModal.Visible = false
@@ -355,27 +354,29 @@ StateChanged.OnClientEvent:Connect(function(data)
         rouletteContainer.Visible = false
         
     elseif phase == "Phase1_Spawn" then
+        topBanner.Visible = true
         phaseTitle.Text = string.format("ROUND %d — HAMMER REVEAL", round)
         phaseTitle.TextColor3 = Color3.fromRGB(85, 255, 127)
-        infoLabel.Text = "Watching the Hammer Roulette spin..."
+        infoLabel.Text = "Deciding this round's executioner hammer..."
         biddingModal.Visible = false
         rankingsModal.Visible = false
         voteModal.Visible = false
         
-        -- Trigger synchronized single-icon roulette animation
         if rarity then
             task.spawn(function()
-                PlayHammerRoulette(rarity, data.RouletteDuration or 3.2)
+                PlayHammerRoulette(rarity, data.RouletteDuration or 6.0)
             end)
         end
         
     elseif phase == "Phase2_Vote" then
+        topBanner.Visible = true
         phaseTitle.Text = "PHASE 2 — ANONYMOUS VOTE"
         phaseTitle.TextColor3 = Color3.fromRGB(200, 120, 255)
         infoLabel.Text = "Eliminated spectators are voting to expose 1 player's bid!"
         rouletteContainer.Visible = false
         
     elseif phase == "Phase3_Bid" then
+        topBanner.Visible = true
         phaseTitle.Text = "PHASE 3 — BID FOR SURVIVAL"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 170, 0)
         rouletteContainer.Visible = false
@@ -388,29 +389,32 @@ StateChanged.OnClientEvent:Connect(function(data)
         end
         
     elseif phase == "Phase4_Reveal" then
-        phaseTitle.Text = "PHASE 4 — BID RANKINGS REVEALED"
-        phaseTitle.TextColor3 = Color3.fromRGB(0, 220, 255)
-        infoLabel.Text = "Leaderboard: Top 50% earned safe tile access!"
+        -- TopBanner is hidden so RankingsModal becomes the sole dominant header
+        topBanner.Visible = false
         biddingModal.Visible = false
         
     elseif phase == "Phase5_Scramble" then
+        topBanner.Visible = true
+        rankingsModal.Visible = false
+        biddingModal.Visible = false
         phaseTitle.Text = "PHASE 5 — THE SCRAMBLE!"
         phaseTitle.TextColor3 = Color3.fromRGB(85, 255, 127)
         infoLabel.Text = "RUN TO A GREEN SAFE TILE BEFORE IMPACT!"
-        rankingsModal.Visible = false
-        biddingModal.Visible = false
         
     elseif phase == "Phase6_Smash" then
+        topBanner.Visible = true
         phaseTitle.Text = "PHASE 6 — HAMMER SMASH!"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 50, 50)
         infoLabel.Text = "BRACE FOR IMPACT!"
         
     elseif phase == "Phase7_Settlement" then
+        topBanner.Visible = true
         phaseTitle.Text = "PHASE 7 — SETTLEMENT"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
         infoLabel.Text = "Bids processed. Checking health..."
         
     elseif phase == "MatchOver" then
+        topBanner.Visible = true
         phaseTitle.Text = "MATCH OVER"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
         infoLabel.Text = "Match concluded."
@@ -422,7 +426,7 @@ StateChanged.OnClientEvent:Connect(function(data)
 end)
 
 --------------------------------------------------------------------------------
--- 6. BIDDING MODAL (PRESERVED FUNCTIONALITY & LAYOUT)
+-- 6. BIDDING MODAL (PRESERVED FUNCTIONALITY & FULL-DURATION DISPLAY)
 --------------------------------------------------------------------------------
 PromptBid.OnClientEvent:Connect(function(data)
     if not IsAlive then return end
@@ -461,79 +465,122 @@ submitBtn.MouseButton1Click:Connect(function()
     BidSubmitted:FireServer(val)
     
     submitBtn.Text = "BID SUBMITTED!"
-    submitBtn.BackgroundColor3 = Color3.fromRGB(50, 60, 75)
-    submittedNotice.Text = string.format("Submitted Secret Bid: $%.2f", val)
-    
-    task.delay(1.5, function()
-        if biddingModal.Visible and HasSubmitted then
-            biddingModal.Visible = false
-        end
-    end)
+    submitBtn.BackgroundColor3 = Color3.fromRGB(48, 56, 72)
+    submittedNotice.Text = string.format("Secret Bid Registered: $%.2f", val)
+    -- Remains visible cleanly until Phase 4 begins
 end)
 
 --------------------------------------------------------------------------------
--- 7. LEADERBOARD: UNIFIED FOUR-COLUMN TABLE
+-- 7. LEADERBOARD: PREMIUM CONTENT-ADAPTIVE 4-COLUMN TABLE
 --------------------------------------------------------------------------------
--- SI.NO | PLAYER NAME | BID | TIME
+-- Columns: SI.NO | PLAYER NAME | BID | TIME
 RankingsRevealed.OnClientEvent:Connect(function(data)
-    -- Configure clean rectangular dark dashboard
-    rankingsModal.Size = UDim2.new(0, 560, 0, 360)
-    rankingsModal.Position = UDim2.new(0.5, -280, 0.5, -180)
-    rankingsModal.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+    -- Hide competing TopBanner so Leaderboard is the sole dominant UI element
+    topBanner.Visible = false
+    
+    -- Combine top & bottom bidders in rank order
+    local allBidders = {}
+    local safeCount = data.SafeCount or 1
+    for _, p in ipairs(data.TopBidders or {}) do table.insert(allBidders, p) end
+    for _, p in ipairs(data.BottomBidders or {}) do table.insert(allBidders, p) end
+    
+    local rowCount = #allBidders
+    local rowHeight = 36
+    local rowPadding = 4
+    local tableContentHeight = rowCount * (rowHeight + rowPadding)
+    
+    -- Dynamic height: header (92px) + content + bottom padding (16px)
+    local desiredHeight = 96 + tableContentHeight + 16
+    local modalHeight = math.clamp(desiredHeight, 220, 390)
+    
+    rankingsModal.Size = UDim2.new(0, 580, 0, modalHeight)
+    rankingsModal.Position = UDim2.new(0.5, -290, 0.5, -modalHeight / 2)
+    rankingsModal.BackgroundColor3 = Color3.fromRGB(12, 13, 17)
     rankingsModal.BackgroundTransparency = 0
     
     local mCorner = rankingsModal:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-    mCorner.CornerRadius = UDim.new(0, 4)
+    mCorner.CornerRadius = UDim.new(0, 6)
     mCorner.Parent = rankingsModal
     
     local mStroke = rankingsModal:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-    mStroke.Color = Color3.fromRGB(35, 35, 45)
+    mStroke.Color = Color3.fromRGB(36, 40, 52)
     mStroke.Thickness = 1
     mStroke.Parent = rankingsModal
     
-    -- Clear previous containers/rows
+    -- Clear previous dynamic contents
     for _, child in ipairs(rankingsModal:GetChildren()) do
-        if child.Name == "HeaderFrame" or child.Name == "LeaderboardScroll" or child.Name == "TitleLabel" or child.Name == "SubLabel" then
+        if child.Name == "HeaderFrame" or child.Name == "LeaderboardScroll" or child.Name == "TitleHeader" then
             child:Destroy()
-        elseif child:IsA("ScrollingFrame") then
+        elseif child:IsA("ScrollingFrame") or (child:IsA("TextLabel") and child.Name ~= "TitleHeader") then
             child.Visible = false
         end
     end
     
-    -- Title
+    -- Integrated Title Header Container (no competing banners)
+    local titleHeader = Instance.new("Frame")
+    titleHeader.Name = "TitleHeader"
+    titleHeader.Size = UDim2.new(1, -24, 0, 50)
+    titleHeader.Position = UDim2.new(0, 12, 0, 10)
+    titleHeader.BackgroundTransparency = 1
+    titleHeader.Parent = rankingsModal
+    
+    -- Phase Badge (Cyan Pill)
+    local phaseBadge = Instance.new("Frame")
+    phaseBadge.Size = UDim2.new(0, 175, 0, 20)
+    phaseBadge.Position = UDim2.new(0, 0, 0, 0)
+    phaseBadge.BackgroundColor3 = Color3.fromRGB(18, 32, 42)
+    local pbCorner = Instance.new("UICorner")
+    pbCorner.CornerRadius = UDim.new(0, 4)
+    pbCorner.Parent = phaseBadge
+    local pbStroke = Instance.new("UIStroke")
+    pbStroke.Color = Color3.fromRGB(0, 180, 220)
+    pbStroke.Thickness = 1
+    pbStroke.Parent = phaseBadge
+    
+    local pbText = Instance.new("TextLabel")
+    pbText.Size = UDim2.new(1, 0, 1, 0)
+    pbText.BackgroundTransparency = 1
+    pbText.Text = "PHASE 4 • BID RANKINGS"
+    pbText.Font = Enum.Font.GothamBold
+    pbText.TextSize = 10
+    pbText.TextColor3 = Color3.fromRGB(0, 210, 255)
+    pbText.TextXAlignment = Enum.TextXAlignment.Center
+    pbText.Parent = phaseBadge
+    phaseBadge.Parent = titleHeader
+    
+    -- Main Leaderboard Title
     local titleLabel = Instance.new("TextLabel")
-    titleLabel.Name = "TitleLabel"
-    titleLabel.Size = UDim2.new(1, -20, 0, 24)
-    titleLabel.Position = UDim2.new(0, 12, 0, 10)
+    titleLabel.Size = UDim2.new(1, 0, 0, 22)
+    titleLabel.Position = UDim2.new(0, 0, 0, 24)
     titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "BID RANKINGS — ROUND REVEAL"
+    titleLabel.Text = "SURVIVAL BID LEADERBOARD"
     titleLabel.Font = Enum.Font.GothamBlack
     titleLabel.TextSize = 16
-    titleLabel.TextColor3 = Color3.fromRGB(240, 240, 255)
+    titleLabel.TextColor3 = Color3.fromRGB(240, 245, 255)
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.Parent = rankingsModal
+    titleLabel.Parent = titleHeader
     
+    -- Subtitle explaining rules
     local subLabel = Instance.new("TextLabel")
-    subLabel.Name = "SubLabel"
-    subLabel.Size = UDim2.new(1, -20, 0, 18)
-    subLabel.Position = UDim2.new(0, 12, 0, 34)
+    subLabel.Size = UDim2.new(1, 0, 0, 16)
+    subLabel.Position = UDim2.new(0, 0, 0, 46)
     subLabel.BackgroundTransparency = 1
-    subLabel.Text = "Top 50% are safe from the hammer smash • Tied bids ranked by submission time"
+    subLabel.Text = "Top 50% earn safe tile access • Earliest submission wins tie-breakers"
     subLabel.Font = Enum.Font.GothamMedium
-    subLabel.TextSize = 12
-    subLabel.TextColor3 = Color3.fromRGB(150, 160, 180)
+    subLabel.TextSize = 11
+    subLabel.TextColor3 = Color3.fromRGB(150, 165, 185)
     subLabel.TextXAlignment = Enum.TextXAlignment.Left
-    subLabel.Parent = rankingsModal
+    subLabel.Parent = titleHeader
     
-    -- Four Column Header Frame: SI.NO | PLAYER NAME | BID | TIME
+    -- Table Header Frame: SI.NO | PLAYER NAME | BID | TIME
     local headerFrame = Instance.new("Frame")
     headerFrame.Name = "HeaderFrame"
-    headerFrame.Size = UDim2.new(1, -24, 0, 28)
-    headerFrame.Position = UDim2.new(0, 12, 0, 60)
-    headerFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+    headerFrame.Size = UDim2.new(1, -24, 0, 26)
+    headerFrame.Position = UDim2.new(0, 12, 0, 68)
+    headerFrame.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
     headerFrame.BorderSizePixel = 0
     local hCorner = Instance.new("UICorner")
-    hCorner.CornerRadius = UDim.new(0, 3)
+    hCorner.CornerRadius = UDim.new(0, 4)
     hCorner.Parent = headerFrame
     
     local function makeHeaderCell(text, size, pos, align)
@@ -544,85 +591,78 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
         hCell.Text = text
         hCell.Font = Enum.Font.GothamBold
         hCell.TextSize = 11
-        hCell.TextColor3 = Color3.fromRGB(160, 165, 180)
+        hCell.TextColor3 = Color3.fromRGB(150, 160, 180)
         hCell.TextXAlignment = align
         hCell.Parent = headerFrame
         return hCell
     end
     
-    makeHeaderCell("SI.NO", UDim2.new(0.12, 0, 1, 0), UDim2.new(0, 6, 0, 0), Enum.TextXAlignment.Center)
-    makeHeaderCell("PLAYER NAME", UDim2.new(0.48, -12, 1, 0), UDim2.new(0.12, 12, 0, 0), Enum.TextXAlignment.Left)
+    makeHeaderCell("SI.NO", UDim2.new(0.10, 0, 1, 0), UDim2.new(0, 6, 0, 0), Enum.TextXAlignment.Center)
+    makeHeaderCell("PLAYER NAME", UDim2.new(0.50, -12, 1, 0), UDim2.new(0.10, 12, 0, 0), Enum.TextXAlignment.Left)
     makeHeaderCell("BID", UDim2.new(0.20, -10, 1, 0), UDim2.new(0.60, 0, 0, 0), Enum.TextXAlignment.Right)
     makeHeaderCell("TIME", UDim2.new(0.20, -12, 1, 0), UDim2.new(0.80, 0, 0, 0), Enum.TextXAlignment.Right)
     headerFrame.Parent = rankingsModal
     
-    -- Scrolling rows container
+    -- Scrolling Container for Rows (Scrolls if > 6 players)
     local scroll = Instance.new("ScrollingFrame")
     scroll.Name = "LeaderboardScroll"
     scroll.Size = UDim2.new(1, -24, 1, -104)
-    scroll.Position = UDim2.new(0, 12, 0, 94)
+    scroll.Position = UDim2.new(0, 12, 0, 98)
     scroll.BackgroundTransparency = 1
     scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 4
-    scroll.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 75)
+    scroll.ScrollBarThickness = (desiredHeight > 390) and 4 or 0
+    scroll.ScrollBarImageColor3 = Color3.fromRGB(60, 68, 85)
+    scroll.ScrollingEnabled = (desiredHeight > 390)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, tableContentHeight)
     
     local uiList = Instance.new("UIListLayout")
     uiList.SortOrder = Enum.SortOrder.LayoutOrder
-    uiList.Padding = UDim.new(0, 4)
+    uiList.Padding = UDim.new(0, rowPadding)
     uiList.Parent = scroll
-    
-    -- Combine top & bottom bidders in order
-    local allBidders = {}
-    local safeCount = data.SafeCount or 1
-    for _, p in ipairs(data.TopBidders or {}) do table.insert(allBidders, p) end
-    for _, p in ipairs(data.BottomBidders or {}) do table.insert(allBidders, p) end
     
     for i, p in ipairs(allBidders) do
         local isSafe = (i <= safeCount)
         local row = Instance.new("Frame")
         row.Name = "Row_" .. i
-        row.Size = UDim2.new(1, -6, 0, 34)
+        row.Size = UDim2.new(1, (desiredHeight > 390) and -8 or 0, 0, rowHeight)
         row.LayoutOrder = i
         row.BorderSizePixel = 0
-        row.BackgroundColor3 = isSafe and Color3.fromRGB(18, 36, 26) or Color3.fromRGB(26, 20, 24)
+        row.BackgroundColor3 = isSafe and Color3.fromRGB(16, 22, 26) or Color3.fromRGB(22, 16, 20)
         
         local rCorner = Instance.new("UICorner")
-        rCorner.CornerRadius = UDim.new(0, 3)
+        rCorner.CornerRadius = UDim.new(0, 4)
         rCorner.Parent = row
         
-        -- Row separator line
-        local sep = Instance.new("Frame")
-        sep.Size = UDim2.new(1, 0, 0, 1)
-        sep.Position = UDim2.new(0, 0, 1, -1)
-        sep.BackgroundColor3 = Color3.fromRGB(38, 38, 46)
-        sep.BorderSizePixel = 0
-        sep.Parent = row
+        local rStroke = Instance.new("UIStroke")
+        rStroke.Color = isSafe and Color3.fromRGB(30, 52, 40) or Color3.fromRGB(48, 28, 34)
+        rStroke.Thickness = 1
+        rStroke.Parent = row
         
-        -- Col 1: SI.NO
+        -- Col 1: SI.NO Rank Pill (#1, #2...)
         local c1 = Instance.new("TextLabel")
-        c1.Size = UDim2.new(0.12, 0, 1, 0)
+        c1.Size = UDim2.new(0.10, 0, 1, 0)
         c1.Position = UDim2.new(0, 6, 0, 0)
         c1.BackgroundTransparency = 1
-        c1.Text = tostring(i)
+        c1.Text = "#" .. tostring(i)
         c1.Font = Enum.Font.GothamBold
         c1.TextSize = 13
-        c1.TextColor3 = isSafe and Color3.fromRGB(85, 255, 127) or Color3.fromRGB(255, 110, 120)
+        c1.TextColor3 = (i == 1) and Color3.fromRGB(255, 215, 0) or (isSafe and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(255, 90, 100))
         c1.TextXAlignment = Enum.TextXAlignment.Center
         c1.Parent = row
         
-        -- Col 2: PLAYER NAME (real username)
+        -- Col 2: Real Roblox Username / Display Name
         local c2 = Instance.new("TextLabel")
-        c2.Size = UDim2.new(0.48, -12, 1, 0)
-        c2.Position = UDim2.new(0.12, 12, 0, 0)
+        c2.Size = UDim2.new(0.50, -12, 1, 0)
+        c2.Position = UDim2.new(0.10, 12, 0, 0)
         c2.BackgroundTransparency = 1
         c2.Text = p.Name or "Unknown"
         c2.Font = Enum.Font.GothamBold
         c2.TextSize = 13
-        c2.TextColor3 = Color3.fromRGB(255, 255, 255)
+        c2.TextColor3 = Color3.fromRGB(240, 245, 255)
         c2.TextXAlignment = Enum.TextXAlignment.Left
         c2.Parent = row
         
-        -- Col 3: BID (accepted bid formatted to 2 decimals)
+        -- Col 3: BID (Right aligned, Gold $X.XX)
         local c3 = Instance.new("TextLabel")
         c3.Size = UDim2.new(0.20, -10, 1, 0)
         c3.Position = UDim2.new(0.60, 0, 0, 0)
@@ -630,11 +670,11 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
         c3.Text = string.format("$%.2f", p.CurrentBid or 0)
         c3.Font = Enum.Font.GothamBlack
         c3.TextSize = 13
-        c3.TextColor3 = Color3.fromRGB(255, 215, 0)
+        c3.TextColor3 = Color3.fromRGB(255, 210, 60)
         c3.TextXAlignment = Enum.TextXAlignment.Right
         c3.Parent = row
         
-        -- Col 4: TIME (elapsed seconds formatted to 2 decimals)
+        -- Col 4: TIME (Right aligned, Slate/Cyan Y.YYs)
         local c4 = Instance.new("TextLabel")
         c4.Size = UDim2.new(0.20, -12, 1, 0)
         c4.Position = UDim2.new(0.80, 0, 0, 0)
@@ -643,14 +683,13 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
         c4.Text = string.format("%.2fs", elapsed)
         c4.Font = Enum.Font.GothamMedium
         c4.TextSize = 13
-        c4.TextColor3 = Color3.fromRGB(180, 195, 220)
+        c4.TextColor3 = Color3.fromRGB(160, 185, 215)
         c4.TextXAlignment = Enum.TextXAlignment.Right
         c4.Parent = row
         
         row.Parent = scroll
     end
     
-    scroll.CanvasSize = UDim2.new(0, 0, 0, #allBidders * 38)
     scroll.Parent = rankingsModal
     rankingsModal.Visible = true
 end)

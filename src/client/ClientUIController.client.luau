@@ -31,21 +31,35 @@ if not SetAFK then
     SetAFK.Parent = Network
 end
 
+-- RemoteEvent for participation state
+local ParticipationChanged = Network:FindFirstChild("ParticipationChanged")
+if not ParticipationChanged then
+    ParticipationChanged = Instance.new("RemoteEvent")
+    ParticipationChanged.Name = "ParticipationChanged"
+    ParticipationChanged.Parent = Network
+end
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local gui = script:FindFirstAncestorWhichIsA("ScreenGui") or playerGui:WaitForChild("BidToSurviveUI")
 
-local topBanner = gui:WaitForChild("TopBanner")
-local phaseTitle = topBanner:WaitForChild("PhaseTitle")
-local timerLabel = topBanner:WaitForChild("TimerLabel")
-local infoLabel = topBanner:WaitForChild("InfoLabel")
+local topBanner = gui:WaitForChild("TopBanner", 5)
+if not topBanner then
+    topBanner = gui:FindFirstChild("TopBanner")
+end
+local phaseTitle = topBanner and topBanner:WaitForChild("PhaseTitle", 3)
+local timerLabel = topBanner and topBanner:WaitForChild("TimerLabel", 3)
+local infoLabel = topBanner and topBanner:WaitForChild("InfoLabel", 3)
 
-local statsCard = gui:WaitForChild("StatsCard")
-local cashLabel = statsCard:WaitForChild("CashLabel")
-local healthBarBg = statsCard:WaitForChild("HealthBarBg")
-local healthBarFill = healthBarBg:WaitForChild("Fill")
-local healthText = healthBarBg:WaitForChild("HealthText")
-local roundLabel = statsCard:WaitForChild("RoundLabel")
+local statsCard = gui:WaitForChild("StatsCard", 5)
+if not statsCard then
+    statsCard = gui:FindFirstChild("StatsCard")
+end
+local cashLabel = statsCard and statsCard:WaitForChild("CashLabel", 3)
+local healthBarBg = statsCard and statsCard:WaitForChild("HealthBarBg", 3)
+local healthBarFill = healthBarBg and healthBarBg:WaitForChild("Fill", 3)
+local healthText = healthBarBg and healthBarBg:WaitForChild("HealthText", 3)
+local roundLabel = statsCard and statsCard:WaitForChild("RoundLabel", 3)
 
 local rarityBadge = gui:FindFirstChild("RarityBadge")
 local biddingModal = gui:WaitForChild("BiddingModal")
@@ -67,10 +81,13 @@ local screenFlash = gui:WaitForChild("ScreenFlash")
 local CurrentMoney = GameConfig.StartingMoney or 20.00
 local CurrentHealth = GameConfig.MaxHealth or 100
 local IsAlive = true
-local IsAFK = true -- Default ON as requested
+local IsAFK = false -- Default OFF as requested
+local CurrentParticipationState = "WaitingInLobby" -- "AFK", "WaitingInLobby", "Active", "Eliminated"
+local SessionToken = 0
 local CurrentPhaseDeadline = 0
 local HasSubmitted = false
 local IsRoulettePlaying = false
+local CurrentShakeConn = nil
 
 -- Known verified base hammer asset (Rare is 100% loaded and verified on Roblox CDN)
 local VERIFIED_BASE_HAMMER = "rbxassetid://130593511073820"
@@ -93,7 +110,163 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- 1. HUD STYLING (HEALTH BAR, MONEY BOX & AFK BUTTON)
+-- 1. REOPEN BUTTON CONTAINER & ROULETTE CONTAINER SETUP
+--------------------------------------------------------------------------------
+local reopenContainer = gui:FindFirstChild("ReopenContainer") or Instance.new("Frame")
+reopenContainer.Name = "ReopenContainer"
+reopenContainer.Size = UDim2.new(0, 320, 0, 34)
+reopenContainer.Position = UDim2.new(0.5, -160, 0, 96)
+reopenContainer.BackgroundTransparency = 1
+reopenContainer.ZIndex = 35
+reopenContainer.Parent = gui
+
+local reopenBidBtn = reopenContainer:FindFirstChild("ReopenBidBtn") or Instance.new("TextButton")
+reopenBidBtn.Name = "ReopenBidBtn"
+reopenBidBtn.Size = UDim2.new(0, 150, 0, 32)
+reopenBidBtn.Position = UDim2.new(0, 0, 0, 0)
+reopenBidBtn.BackgroundColor3 = Color3.fromRGB(16, 24, 20)
+reopenBidBtn.Text = "OPEN BID CARD"
+reopenBidBtn.TextColor3 = Color3.fromRGB(60, 220, 110)
+reopenBidBtn.Font = Enum.Font.GothamBold
+reopenBidBtn.TextSize = 12
+reopenBidBtn.Visible = false
+reopenBidBtn.ZIndex = 36
+local rbbCorner = reopenBidBtn:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+rbbCorner.CornerRadius = UDim.new(0, 6)
+rbbCorner.Parent = reopenBidBtn
+local rbbStroke = reopenBidBtn:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
+rbbStroke.Color = Color3.fromRGB(40, 180, 90)
+rbbStroke.Thickness = 1
+rbbStroke.Parent = reopenBidBtn
+reopenBidBtn.Parent = reopenContainer
+
+local reopenRankBtn = reopenContainer:FindFirstChild("ReopenRankBtn") or Instance.new("TextButton")
+reopenRankBtn.Name = "ReopenRankBtn"
+reopenRankBtn.Size = UDim2.new(0, 150, 0, 32)
+reopenRankBtn.Position = UDim2.new(0, 160, 0, 0)
+reopenRankBtn.BackgroundColor3 = Color3.fromRGB(16, 22, 32)
+reopenRankBtn.Text = "LEADERBOARD"
+reopenRankBtn.TextColor3 = Color3.fromRGB(0, 210, 255)
+reopenRankBtn.Font = Enum.Font.GothamBold
+reopenRankBtn.TextSize = 12
+reopenRankBtn.Visible = false
+reopenRankBtn.ZIndex = 36
+local rrbCorner = reopenRankBtn:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+rrbCorner.CornerRadius = UDim.new(0, 6)
+rrbCorner.Parent = reopenRankBtn
+local rrbStroke = reopenRankBtn:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
+rrbStroke.Color = Color3.fromRGB(0, 180, 220)
+rrbStroke.Thickness = 1
+rrbStroke.Parent = reopenRankBtn
+reopenRankBtn.Parent = reopenContainer
+
+local rouletteContainer = gui:FindFirstChild("RouletteContainer") or Instance.new("Frame")
+rouletteContainer.Name = "RouletteContainer"
+rouletteContainer.Size = UDim2.new(0, 340, 0, 340)
+rouletteContainer.Position = UDim2.new(0.5, -170, 0.42, -170)
+rouletteContainer.BackgroundTransparency = 1
+rouletteContainer.Visible = false
+rouletteContainer.ZIndex = 30
+rouletteContainer.Parent = gui
+
+local glowHalo = rouletteContainer:FindFirstChild("GlowHalo") or Instance.new("ImageLabel")
+glowHalo.Name = "GlowHalo"
+glowHalo.Size = UDim2.new(0, 280, 0, 280)
+glowHalo.Position = UDim2.new(0.5, -140, 0, 5)
+glowHalo.BackgroundTransparency = 1
+glowHalo.Image = "rbxassetid://5028857084"
+glowHalo.ImageTransparency = 0.4
+glowHalo.ZIndex = 31
+glowHalo.Parent = rouletteContainer
+
+local hammerIcon = rouletteContainer:FindFirstChild("HammerIcon") or Instance.new("ImageLabel")
+hammerIcon.Name = "HammerIcon"
+hammerIcon.Size = UDim2.new(0, 220, 0, 220)
+hammerIcon.Position = UDim2.new(0.5, -110, 0, 30)
+hammerIcon.BackgroundTransparency = 1
+hammerIcon.ScaleType = Enum.ScaleType.Fit
+hammerIcon.ZIndex = 33
+hammerIcon.Parent = rouletteContainer
+
+local rarityTitle = rouletteContainer:FindFirstChild("RarityTitle") or Instance.new("TextLabel")
+rarityTitle.Name = "RarityTitle"
+rarityTitle.Size = UDim2.new(1, 0, 0, 32)
+rarityTitle.Position = UDim2.new(0, 0, 0, 255)
+rarityTitle.BackgroundTransparency = 1
+rarityTitle.Font = Enum.Font.GothamBlack
+rarityTitle.TextSize = 24
+rarityTitle.TextXAlignment = Enum.TextXAlignment.Center
+rarityTitle.TextStrokeTransparency = 0.25
+rarityTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+rarityTitle.ZIndex = 33
+rarityTitle.Parent = rouletteContainer
+
+local damageTitle = rouletteContainer:FindFirstChild("DamageTitle") or Instance.new("TextLabel")
+damageTitle.Name = "DamageTitle"
+damageTitle.Size = UDim2.new(1, 0, 0, 22)
+damageTitle.Position = UDim2.new(0, 0, 0, 288)
+damageTitle.BackgroundTransparency = 1
+damageTitle.Font = Enum.Font.GothamBold
+damageTitle.TextSize = 16
+damageTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
+damageTitle.TextStrokeTransparency = 0.35
+damageTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+damageTitle.TextXAlignment = Enum.TextXAlignment.Center
+damageTitle.ZIndex = 33
+damageTitle.Parent = rouletteContainer
+
+--------------------------------------------------------------------------------
+-- 2. CAMERA SHAKE CONTROLS
+--------------------------------------------------------------------------------
+local function StopCameraShake()
+    if CurrentShakeConn then
+        CurrentShakeConn:Disconnect()
+        CurrentShakeConn = nil
+    end
+end
+
+local function DoCameraShake(intensity, duration)
+    StopCameraShake()
+    local startTime = tick()
+    CurrentShakeConn = RunService.RenderStepped:Connect(function()
+        local elapsed = tick() - startTime
+        if elapsed > duration or IsAFK or (CurrentParticipationState ~= "Active") then
+            StopCameraShake()
+            return
+        end
+        local factor = (1 - (elapsed / duration)) * intensity
+        local shakeX = (math.random() - 0.5) * factor * 0.8
+        local shakeY = (math.random() - 0.5) * factor * 0.8
+        local shakeZ = (math.random() - 0.5) * factor * 0.4
+        Camera.CFrame = Camera.CFrame * CFrame.Angles(math.rad(shakeX), math.rad(shakeY), math.rad(shakeZ))
+    end)
+end
+
+--------------------------------------------------------------------------------
+-- 3. STATE AND UI ISOLATION HELPERS
+--------------------------------------------------------------------------------
+local function IsActiveInRound()
+    return (not IsAFK) and (CurrentParticipationState == "Active")
+end
+
+local function ForceHideAllRoundUI()
+    SessionToken = SessionToken + 1
+    StopCameraShake()
+    topBanner.Visible = false
+    biddingModal.Visible = false
+    rankingsModal.Visible = false
+    voteModal.Visible = false
+    matchOverModal.Visible = false
+    rouletteContainer.Visible = false
+    reopenContainer.Visible = false
+    reopenBidBtn.Visible = false
+    reopenRankBtn.Visible = false
+    screenFlash.BackgroundTransparency = 1
+    IsRoulettePlaying = false
+end
+
+--------------------------------------------------------------------------------
+-- 4. HUD STYLING (HEALTH BAR, MONEY BOX & AFK TOGGLE BUTTON)
 --------------------------------------------------------------------------------
 statsCard.BackgroundTransparency = 1
 local oldCardStroke = statsCard:FindFirstChildOfClass("UIStroke")
@@ -172,186 +345,88 @@ if rarityBadge then
 end
 
 --------------------------------------------------------------------------------
--- AFK BUTTON ON LEFT SIDE (DEFAULT ON)
+-- AFK TOGGLE BUTTON ON LEFT SIDE (STRICTLY TEXT ONLY: AFK: OFF / AFK: ON)
 --------------------------------------------------------------------------------
 local afkButton = gui:FindFirstChild("AFKButton") or Instance.new("TextButton")
 afkButton.Name = "AFKButton"
-afkButton.Size = UDim2.new(0, 175, 0, 36)
-afkButton.Position = UDim2.new(0, 20, 1, -165)
-afkButton.BackgroundColor3 = Color3.fromRGB(24, 18, 14)
+afkButton.Size = UDim2.new(0, 88, 0, 26)
+afkButton.Position = UDim2.new(0, 20, 1, -150)
 afkButton.Font = Enum.Font.GothamBold
-afkButton.TextSize = 13
+afkButton.TextSize = 12
 afkButton.ZIndex = 20
 afkButton.AutoButtonColor = false
 
 local afkCorner = afkButton:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-afkCorner.CornerRadius = UDim.new(0, 6)
+afkCorner.CornerRadius = UDim.new(0, 4)
 afkCorner.Parent = afkButton
 
 local afkStroke = afkButton:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-afkStroke.Color = Color3.fromRGB(240, 150, 30)
-afkStroke.Thickness = 1.5
+afkStroke.Thickness = 1
 afkStroke.Parent = afkButton
 
 local function UpdateAFKVisual()
     if IsAFK then
-        afkButton.BackgroundColor3 = Color3.fromRGB(28, 18, 12)
+        afkButton.BackgroundColor3 = Color3.fromRGB(28, 20, 14)
         afkButton.TextColor3 = Color3.fromRGB(255, 175, 50)
-        afkButton.Text = "💤 AFK: ON (Click to Play)"
-        afkStroke.Color = Color3.fromRGB(240, 150, 30)
+        afkButton.Text = "AFK: ON"
+        afkStroke.Color = Color3.fromRGB(215, 130, 25)
     else
-        afkButton.BackgroundColor3 = Color3.fromRGB(14, 28, 18)
-        afkButton.TextColor3 = Color3.fromRGB(60, 230, 110)
-        afkButton.Text = "⚔️ READY (In Game)"
-        afkStroke.Color = Color3.fromRGB(40, 210, 95)
+        afkButton.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
+        afkButton.TextColor3 = Color3.fromRGB(150, 165, 185)
+        afkButton.Text = "AFK: OFF"
+        afkStroke.Color = Color3.fromRGB(36, 42, 56)
     end
 end
 
 UpdateAFKVisual()
 afkButton.Parent = gui
 
--- Initialize server state to AFK ON
-task.spawn(function()
-    task.wait(0.5)
-    SetAFK:FireServer(true)
-end)
-
 afkButton.MouseButton1Click:Connect(function()
     IsAFK = not IsAFK
     UpdateAFKVisual()
+    if IsAFK then
+        CurrentParticipationState = "AFK"
+        ForceHideAllRoundUI()
+    else
+        CurrentParticipationState = "WaitingInLobby"
+        ForceHideAllRoundUI()
+    end
     SetAFK:FireServer(IsAFK)
 end)
 
 --------------------------------------------------------------------------------
--- REOPEN BUTTONS (MIDDLE AND LITTLE TOP)
+-- REOPEN BUTTON CLICKS
 --------------------------------------------------------------------------------
-local reopenContainer = gui:FindFirstChild("ReopenContainer") or Instance.new("Frame")
-reopenContainer.Name = "ReopenContainer"
-reopenContainer.Size = UDim2.new(0, 320, 0, 34)
-reopenContainer.Position = UDim2.new(0.5, -160, 0, 96)
-reopenContainer.BackgroundTransparency = 1
-reopenContainer.ZIndex = 35
-reopenContainer.Parent = gui
-
-local reopenBidBtn = reopenContainer:FindFirstChild("ReopenBidBtn") or Instance.new("TextButton")
-reopenBidBtn.Name = "ReopenBidBtn"
-reopenBidBtn.Size = UDim2.new(0, 150, 0, 32)
-reopenBidBtn.Position = UDim2.new(0, 0, 0, 0)
-reopenBidBtn.BackgroundColor3 = Color3.fromRGB(16, 24, 20)
-reopenBidBtn.Text = "💵 OPEN BID CARD"
-reopenBidBtn.TextColor3 = Color3.fromRGB(60, 220, 110)
-reopenBidBtn.Font = Enum.Font.GothamBold
-reopenBidBtn.TextSize = 12
-reopenBidBtn.Visible = false
-reopenBidBtn.ZIndex = 36
-local rbbCorner = Instance.new("UICorner")
-rbbCorner.CornerRadius = UDim.new(0, 6)
-rbbCorner.Parent = reopenBidBtn
-local rbbStroke = Instance.new("UIStroke")
-rbbStroke.Color = Color3.fromRGB(40, 180, 90)
-rbbStroke.Thickness = 1
-rbbStroke.Parent = reopenBidBtn
-reopenBidBtn.Parent = reopenContainer
-
-local reopenRankBtn = reopenContainer:FindFirstChild("ReopenRankBtn") or Instance.new("TextButton")
-reopenRankBtn.Name = "ReopenRankBtn"
-reopenRankBtn.Size = UDim2.new(0, 150, 0, 32)
-reopenRankBtn.Position = UDim2.new(0, 160, 0, 0)
-reopenRankBtn.BackgroundColor3 = Color3.fromRGB(16, 22, 32)
-reopenRankBtn.Text = "🏆 LEADERBOARD"
-reopenRankBtn.TextColor3 = Color3.fromRGB(0, 210, 255)
-reopenRankBtn.Font = Enum.Font.GothamBold
-reopenRankBtn.TextSize = 12
-reopenRankBtn.Visible = false
-reopenRankBtn.ZIndex = 36
-local rrbCorner = Instance.new("UICorner")
-rrbCorner.CornerRadius = UDim.new(0, 6)
-rrbCorner.Parent = reopenRankBtn
-local rrbStroke = Instance.new("UIStroke")
-rrbStroke.Color = Color3.fromRGB(0, 180, 220)
-rrbStroke.Thickness = 1
-rrbStroke.Parent = reopenRankBtn
-reopenRankBtn.Parent = reopenContainer
-
 reopenBidBtn.MouseButton1Click:Connect(function()
+    if not IsActiveInRound() then return end
     biddingModal.Visible = true
     reopenBidBtn.Visible = false
+    if not reopenRankBtn.Visible then
+        reopenContainer.Visible = false
+    end
 end)
 
 reopenRankBtn.MouseButton1Click:Connect(function()
+    if not IsActiveInRound() then return end
     rankingsModal.Visible = true
     reopenRankBtn.Visible = false
+    if not reopenBidBtn.Visible then
+        reopenContainer.Visible = false
+    end
 end)
 
 --------------------------------------------------------------------------------
--- 2. HAMMER ROULETTE (GUARANTEED 100% VISIBLE WITH WORKING ASSET FALLBACK)
+-- 5. HAMMER ROULETTE (GUARANTEED 100% VISIBLE WITH WORKING ASSET FALLBACK)
 --------------------------------------------------------------------------------
-local rouletteContainer = gui:FindFirstChild("RouletteContainer") or Instance.new("Frame")
-rouletteContainer.Name = "RouletteContainer"
-rouletteContainer.Size = UDim2.new(0, 340, 0, 340)
-rouletteContainer.Position = UDim2.new(0.5, -170, 0.42, -170)
-rouletteContainer.BackgroundTransparency = 1
-rouletteContainer.Visible = false
-rouletteContainer.ZIndex = 30
-rouletteContainer.Parent = gui
-
-local glowHalo = rouletteContainer:FindFirstChild("GlowHalo") or Instance.new("ImageLabel")
-glowHalo.Name = "GlowHalo"
-glowHalo.Size = UDim2.new(0, 280, 0, 280)
-glowHalo.Position = UDim2.new(0.5, -140, 0, 5)
-glowHalo.BackgroundTransparency = 1
-glowHalo.Image = "rbxassetid://5028857084"
-glowHalo.ImageTransparency = 0.4
-glowHalo.ZIndex = 31
-glowHalo.Parent = rouletteContainer
-
-local hammerIcon = rouletteContainer:FindFirstChild("HammerIcon") or Instance.new("ImageLabel")
-hammerIcon.Name = "HammerIcon"
-hammerIcon.Size = UDim2.new(0, 220, 0, 220)
-hammerIcon.Position = UDim2.new(0.5, -110, 0, 30)
-hammerIcon.BackgroundTransparency = 1
-hammerIcon.ScaleType = Enum.ScaleType.Fit
-hammerIcon.ZIndex = 33
-hammerIcon.Parent = rouletteContainer
-
-local rarityTitle = rouletteContainer:FindFirstChild("RarityTitle") or Instance.new("TextLabel")
-rarityTitle.Name = "RarityTitle"
-rarityTitle.Size = UDim2.new(1, 0, 0, 32)
-rarityTitle.Position = UDim2.new(0, 0, 0, 255)
-rarityTitle.BackgroundTransparency = 1
-rarityTitle.Font = Enum.Font.GothamBlack
-rarityTitle.TextSize = 24
-rarityTitle.TextXAlignment = Enum.TextXAlignment.Center
-rarityTitle.TextStrokeTransparency = 0.25
-rarityTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-rarityTitle.ZIndex = 33
-rarityTitle.Parent = rouletteContainer
-
-local damageTitle = rouletteContainer:FindFirstChild("DamageTitle") or Instance.new("TextLabel")
-damageTitle.Name = "DamageTitle"
-damageTitle.Size = UDim2.new(1, 0, 0, 22)
-damageTitle.Position = UDim2.new(0, 0, 0, 288)
-damageTitle.BackgroundTransparency = 1
-damageTitle.Font = Enum.Font.GothamBold
-damageTitle.TextSize = 16
-damageTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
-damageTitle.TextStrokeTransparency = 0.35
-damageTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-damageTitle.TextXAlignment = Enum.TextXAlignment.Center
-damageTitle.ZIndex = 33
-damageTitle.Parent = rouletteContainer
-
 local function SetHammerVisual(rarityData)
     if not rarityData then return end
     
-    -- If the specific asset failed preload or is pending moderation, seamlessly fall back to verified base asset
     local assetId = rarityData.AssetId
     if not assetId or assetId == "" or PendingAssets[assetId] then
         assetId = VERIFIED_BASE_HAMMER
     end
     
     hammerIcon.Image = assetId
-    -- Color tint ensures every single tier is vividly distinguished
     hammerIcon.ImageColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
     glowHalo.ImageColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
     rarityTitle.Text = string.format("🔨 %s HAMMER", (rarityData.Name or "COMMON"):upper())
@@ -360,8 +435,9 @@ local function SetHammerVisual(rarityData)
 end
 
 local function PlayHammerRoulette(targetRarity, totalDuration)
-    if IsRoulettePlaying then return end
+    if IsRoulettePlaying or (not IsActiveInRound()) then return end
     IsRoulettePlaying = true
+    local myToken = SessionToken
     
     rouletteContainer.Visible = true
     glowHalo.ImageTransparency = 0.4
@@ -378,6 +454,12 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
     
     local currentIdx = 1
     for i, delay in ipairs(delays) do
+        if (not IsActiveInRound()) or myToken ~= SessionToken then
+            rouletteContainer.Visible = false
+            IsRoulettePlaying = false
+            return
+        end
+        
         currentIdx = (currentIdx % #rarities) + 1
         local r = rarities[currentIdx]
         SetHammerVisual(r)
@@ -392,12 +474,24 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
         
         task.wait(delay * 0.5)
         
+        if (not IsActiveInRound()) or myToken ~= SessionToken then
+            rouletteContainer.Visible = false
+            IsRoulettePlaying = false
+            return
+        end
+        
         TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
             Size = UDim2.new(0, 220, 0, 220),
             Position = UDim2.new(0.5, -110, 0, 30)
         }):Play()
         
         task.wait(delay * 0.5)
+    end
+    
+    if (not IsActiveInRound()) or myToken ~= SessionToken then
+        rouletteContainer.Visible = false
+        IsRoulettePlaying = false
+        return
     end
     
     -- Stop EXACTLY on the server-authoritative rarity
@@ -417,6 +511,12 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
     
     task.wait(1.5)
     
+    if (not IsActiveInRound()) or myToken ~= SessionToken then
+        rouletteContainer.Visible = false
+        IsRoulettePlaying = false
+        return
+    end
+    
     TweenService:Create(hammerIcon, TweenInfo.new(0.4), {
         ImageTransparency = 1,
         Size = UDim2.new(0, 190, 0, 190)
@@ -431,10 +531,10 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
 end
 
 --------------------------------------------------------------------------------
--- 3. FRAME-ACCURATE AUTHORITATIVE COUNTDOWN TICKER
+-- 6. FRAME-ACCURATE AUTHORITATIVE COUNTDOWN TICKER
 --------------------------------------------------------------------------------
 RunService.Heartbeat:Connect(function()
-    if CurrentPhaseDeadline > 0 then
+    if CurrentPhaseDeadline > 0 and (IsActiveInRound() or (CurrentPhaseDeadline - os.clock() > 0 and not IsAFK and topBanner.Visible)) then
         local remaining = math.max(0, math.ceil(CurrentPhaseDeadline - os.clock()))
         local mins = math.floor(remaining / 60)
         local secs = remaining % 60
@@ -445,13 +545,20 @@ RunService.Heartbeat:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 4. STATS SYNC
+-- 7. STATS & PARTICIPATION SYNC
 --------------------------------------------------------------------------------
 StatsUpdated.OnClientEvent:Connect(function(stats)
     local oldHealth = CurrentHealth
     CurrentMoney = stats.Money or CurrentMoney
     CurrentHealth = stats.Health or CurrentHealth
     IsAlive = (stats.IsAlive ~= nil) and stats.IsAlive or IsAlive
+    if stats.IsAFK ~= nil then
+        IsAFK = stats.IsAFK
+        UpdateAFKVisual()
+    end
+    if stats.ParticipationState ~= nil then
+        CurrentParticipationState = stats.ParticipationState
+    end
     
     cashLabel.Text = string.format("$%.2f", CurrentMoney)
     
@@ -461,17 +568,30 @@ StatsUpdated.OnClientEvent:Connect(function(stats)
     }):Play()
     healthText.Text = string.format("%d / 100", CurrentHealth)
     
-    if CurrentHealth < oldHealth then
+    if CurrentHealth < oldHealth and IsActiveInRound() then
         screenFlash.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
         screenFlash.BackgroundTransparency = 0.45
         TweenService:Create(screenFlash, TweenInfo.new(0.5), {
             BackgroundTransparency = 1
         }):Play()
     end
+    
+    if not IsActiveInRound() then
+        ForceHideAllRoundUI()
+    end
+end)
+
+ParticipationChanged.OnClientEvent:Connect(function(newState)
+    if newState then
+        CurrentParticipationState = newState
+    end
+    if not IsActiveInRound() then
+        ForceHideAllRoundUI()
+    end
 end)
 
 --------------------------------------------------------------------------------
--- 5. PHASE STATE HANDLER
+-- 8. PHASE STATE HANDLER
 --------------------------------------------------------------------------------
 StateChanged.OnClientEvent:Connect(function(data)
     local phase = data.Phase
@@ -480,24 +600,44 @@ StateChanged.OnClientEvent:Connect(function(data)
     local living = data.LivingCount or 1
     
     CurrentPhaseDeadline = data.Deadline or (os.clock() + (data.Duration or 0))
-    roundLabel.Text = string.format("ROUND %d • %d ALIVE", round, living)
+    
+    if IsActiveInRound() then
+        roundLabel.Text = string.format("ROUND %d • %d ALIVE", round, living)
+    elseif IsAFK then
+        roundLabel.Text = "LOBBY (AFK)"
+    else
+        roundLabel.Text = "WAITING IN LOBBY"
+    end
     
     -- Auto-hide reopen buttons when switching phases
     reopenBidBtn.Visible = false
     reopenRankBtn.Visible = false
+    reopenContainer.Visible = false
     
     if phase == "Intermission" then
+        if IsAFK then
+            ForceHideAllRoundUI()
+            return
+        end
         topBanner.Visible = true
         phaseTitle.Text = "LOBBY COUNTDOWN"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
-        infoLabel.Text = "Match starting shortly... Toggle AFK to enter play area"
+        infoLabel.Text = "Match starting shortly... Click AFK to opt out"
         biddingModal.Visible = false
         rankingsModal.Visible = false
         voteModal.Visible = false
         matchOverModal.Visible = false
         rouletteContainer.Visible = false
-        
-    elseif phase == "Phase1_Spawn" then
+        return
+    end
+    
+    -- During running rounds (Phase 1 through 7):
+    if not IsActiveInRound() then
+        ForceHideAllRoundUI()
+        return
+    end
+    
+    if phase == "Phase1_Spawn" then
         topBanner.Visible = true
         phaseTitle.Text = string.format("ROUND %d — HAMMER REVEAL", round)
         phaseTitle.TextColor3 = Color3.fromRGB(85, 255, 127)
@@ -569,9 +709,8 @@ StateChanged.OnClientEvent:Connect(function(data)
 end)
 
 --------------------------------------------------------------------------------
--- 6. BIDDING MODAL (WITH RED X CLOSE BUTTON & REOPEN BUTTON)
+-- 9. BIDDING MODAL (WITH RED X CLOSE BUTTON & REOPEN BUTTON)
 --------------------------------------------------------------------------------
--- Attach Red X Close Button to BiddingModal
 local closeBidBtn = biddingModal:FindFirstChild("CloseBidBtn") or Instance.new("TextButton")
 closeBidBtn.Name = "CloseBidBtn"
 closeBidBtn.Size = UDim2.new(0, 26, 0, 26)
@@ -582,18 +721,25 @@ closeBidBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeBidBtn.Font = Enum.Font.GothamBold
 closeBidBtn.TextSize = 14
 closeBidBtn.ZIndex = 25
-local cbbCorner = Instance.new("UICorner")
+local cbbCorner = closeBidBtn:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
 cbbCorner.CornerRadius = UDim.new(0, 13)
 cbbCorner.Parent = closeBidBtn
 closeBidBtn.Parent = biddingModal
 
 closeBidBtn.MouseButton1Click:Connect(function()
     biddingModal.Visible = false
-    reopenBidBtn.Visible = true
+    if IsActiveInRound() then
+        reopenContainer.Visible = true
+        reopenBidBtn.Visible = true
+    end
 end)
 
 PromptBid.OnClientEvent:Connect(function(data)
-    if not IsAlive or IsAFK then return end
+    if not IsActiveInRound() then
+        biddingModal.Visible = false
+        reopenBidBtn.Visible = false
+        return
+    end
     HasSubmitted = false
     bidInput.Text = ""
     submittedNotice.Text = ""
@@ -621,7 +767,7 @@ for _, btn in ipairs(quickFrame:GetChildren()) do
 end
 
 submitBtn.MouseButton1Click:Connect(function()
-    if HasSubmitted then return end
+    if HasSubmitted or not IsActiveInRound() then return end
     local val = tonumber(bidInput.Text) or 0
     val = math.clamp(val, 0, CurrentMoney)
     val = math.floor(val * 100) / 100
@@ -635,10 +781,14 @@ submitBtn.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 7. LEADERBOARD: PREMIUM CONTENT-ADAPTIVE 4-COLUMN TABLE WITH RED X
+-- 10. LEADERBOARD: PREMIUM CONTENT-ADAPTIVE 4-COLUMN TABLE WITH RED X
 --------------------------------------------------------------------------------
--- Columns: SI.NO | PLAYER NAME | BID | TIME
 RankingsRevealed.OnClientEvent:Connect(function(data)
+    if not IsActiveInRound() then
+        rankingsModal.Visible = false
+        reopenRankBtn.Visible = false
+        return
+    end
     topBanner.Visible = false
     
     local allBidders = {}
@@ -679,14 +829,17 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     closeRankBtn.Font = Enum.Font.GothamBold
     closeRankBtn.TextSize = 14
     closeRankBtn.ZIndex = 30
-    local crbCorner = Instance.new("UICorner")
+    local crbCorner = closeRankBtn:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
     crbCorner.CornerRadius = UDim.new(0, 13)
     crbCorner.Parent = closeRankBtn
     closeRankBtn.Parent = rankingsModal
     
     closeRankBtn.MouseButton1Click:Connect(function()
         rankingsModal.Visible = false
-        reopenRankBtn.Visible = true
+        if IsActiveInRound() then
+            reopenContainer.Visible = true
+            reopenRankBtn.Visible = true
+        end
     end)
     
     -- Clear previous dynamic contents
@@ -878,10 +1031,13 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
 end)
 
 --------------------------------------------------------------------------------
--- 8. SPECTATOR VOTE POPULATOR
+-- 11. SPECTATOR VOTE POPULATOR
 --------------------------------------------------------------------------------
 PromptVote.OnClientEvent:Connect(function(data)
-    if IsAlive or IsAFK then return end
+    if IsAFK or IsActiveInRound() or CurrentParticipationState ~= "Eliminated" then
+        voteModal.Visible = false
+        return
+    end
     for _, c in ipairs(candidateContainer:GetChildren()) do
         if c:IsA("Frame") then c:Destroy() end
     end
@@ -930,39 +1086,34 @@ PromptVote.OnClientEvent:Connect(function(data)
 end)
 
 --------------------------------------------------------------------------------
--- 9. CAMERA SHAKE & SMASH IMPACT FX
+-- 12. CAMERA SHAKE & SMASH IMPACT FX
 --------------------------------------------------------------------------------
-local function DoCameraShake(intensity, duration)
-    local startTime = tick()
-    local conn
-    conn = RunService.RenderStepped:Connect(function()
-        local elapsed = tick() - startTime
-        if elapsed > duration then
-            conn:Disconnect()
-            return
-        end
-        local factor = (1 - (elapsed / duration)) * intensity
-        local shakeX = (math.random() - 0.5) * factor * 0.8
-        local shakeY = (math.random() - 0.5) * factor * 0.8
-        local shakeZ = (math.random() - 0.5) * factor * 0.4
-        Camera.CFrame = Camera.CFrame * CFrame.Angles(math.rad(shakeX), math.rad(shakeY), math.rad(shakeZ))
-    end)
-end
-
 HammerSmash.OnClientEvent:Connect(function(data)
+    if not IsActiveInRound() then return end
     local rarity = data.Rarity
     local impactDelay = data.ImpactDelay or 1.33
+    local myToken = SessionToken
     
     task.delay(impactDelay, function()
+        if (not IsActiveInRound()) or myToken ~= SessionToken then return end
         local intensity = rarity and rarity.CameraShake or 1.0
         DoCameraShake(intensity * 3, 0.8)
     end)
 end)
 
+RoundOver.OnClientEvent:Connect(function()
+    rankingsModal.Visible = false
+    reopenRankBtn.Visible = false
+    if not reopenBidBtn.Visible then
+        reopenContainer.Visible = false
+    end
+end)
+
 --------------------------------------------------------------------------------
--- 10. MATCH OVER / WINNER CELEBRATION
+-- 13. MATCH OVER / WINNER CELEBRATION
 --------------------------------------------------------------------------------
 MatchOver.OnClientEvent:Connect(function(data)
+    if IsAFK then return end
     winnerName.Text = (data.Winner or "No One") .. " WINS!"
     matchOverModal.Visible = true
 end)

@@ -26,6 +26,14 @@ if not SetAFK then
     SetAFK.Parent = Network
 end
 
+-- Ensure ParticipationChanged RemoteEvent exists
+local ParticipationChanged = Network:FindFirstChild("ParticipationChanged")
+if not ParticipationChanged then
+    ParticipationChanged = Instance.new("RemoteEvent")
+    ParticipationChanged.Name = "ParticipationChanged"
+    ParticipationChanged.Parent = Network
+end
+
 local Map = workspace:WaitForChild("BidToSurviveMap")
 local SpawnArea = Map:WaitForChild("SpawnArea")
 local GameplayArea = Map:WaitForChild("GameplayArea")
@@ -50,32 +58,40 @@ local ActiveBots = {}
 -- UTILITY & STATS
 --------------------------------------------------------------------------------
 
-local function GetLivingPlayers()
-    local living = {}
+local function GetActivePlayers()
+    local active = {}
     for id, data in pairs(PlayerData) do
-        if data.IsAlive and not data.IsAFK then
-            table.insert(living, data)
+        if data.IsAlive and not data.IsAFK and data.ParticipationState == "Active" then
+            table.insert(active, data)
         end
     end
-    return living
+    return active
+end
+
+local function GetActiveRealPlayers()
+    local active = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        local data = PlayerData[player.UserId]
+        if data and data.IsAlive and not data.IsAFK and data.ParticipationState == "Active" then
+            table.insert(active, player)
+        end
+    end
+    return active
+end
+
+local function GetLivingPlayers()
+    return GetActivePlayers()
 end
 
 local function GetLivingRealPlayers()
-    local living = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        local data = PlayerData[player.UserId]
-        if data and data.IsAlive and not data.IsAFK then
-            table.insert(living, player)
-        end
-    end
-    return living
+    return GetActiveRealPlayers()
 end
 
 local function GetSpectatorPlayers()
     local spectators = {}
     for _, player in ipairs(Players:GetPlayers()) do
         local data = PlayerData[player.UserId]
-        if data and not data.IsAlive and not data.IsAFK then
+        if data and not data.IsAlive and not data.IsAFK and data.ParticipationState == "Eliminated" then
             table.insert(spectators, player)
         end
     end
@@ -85,10 +101,10 @@ end
 local function BroadcastState(phaseName, duration, extra)
     CurrentPhase = phaseName
     PhaseTimer = duration or 0
-    local livingCount = #GetLivingPlayers()
+    local livingCount = #GetActivePlayers()
     local deadline = os.clock() + (duration or 0)
     
-    print(string.format("[ROUND MANAGER] Phase: %s | Round: %d | Duration: %ds | Living: %d", phaseName, CurrentRound, PhaseTimer, livingCount))
+    print(string.format("[ROUND MANAGER] Phase: %s | Round: %d | Duration: %ds | Active Living: %d", phaseName, CurrentRound, PhaseTimer, livingCount))
     StateChanged:FireAllClients({
         Phase = CurrentPhase,
         Duration = PhaseTimer,
@@ -104,13 +120,18 @@ end
 local function SyncStats(player)
     local data = PlayerData[player.UserId]
     if data then
+        local pState = data.ParticipationState or (data.IsAFK and "AFK" or "WaitingInLobby")
         StatsUpdated:FireClient(player, {
             Money = data.Money,
             Health = data.Health,
             IsAlive = data.IsAlive,
             IsAFK = data.IsAFK,
+            ParticipationState = pState,
             Round = CurrentRound
         })
+        if ParticipationChanged then
+            ParticipationChanged:FireClient(player, pState)
+        end
     end
 end
 
@@ -206,6 +227,7 @@ local function CreateBotDummy(name, id, startPos)
         Health = GameConfig.MaxHealth,
         IsAlive = true,
         IsAFK = false,
+        ParticipationState = "Active",
         CurrentBid = 0,
         Votes = 0,
         IsBot = true,
@@ -313,7 +335,8 @@ local function InitMatch()
     
     for _, player in ipairs(Players:GetPlayers()) do
         local existing = PlayerData[player.UserId]
-        local isAfk = (existing ~= nil) and existing.IsAFK or true -- AFK default ON
+        local isAfk = (existing ~= nil) and existing.IsAFK or false
+        local partState = isAfk and "AFK" or "WaitingInLobby"
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
@@ -321,6 +344,7 @@ local function InitMatch()
             Health = (existing and existing.Health) or GameConfig.MaxHealth,
             IsAlive = true,
             IsAFK = isAfk,
+            ParticipationState = partState,
             CurrentBid = 0,
             Votes = 0,
             IsBot = false,
@@ -343,7 +367,22 @@ local function RunMatch(session)
         end
         
         CurrentRound = CurrentRound + 1
-        local living = GetLivingPlayers()
+        
+        -- Safely admit all eligible waiting players into this active round!
+        for _, player in ipairs(Players:GetPlayers()) do
+            local data = PlayerData[player.UserId]
+            if data and not data.IsAFK and data.IsAlive then
+                data.ParticipationState = "Active"
+                SyncStats(player)
+            end
+        end
+        for _, bot in ipairs(ActiveBots) do
+            if bot.IsAlive then
+                bot.ParticipationState = "Active"
+            end
+        end
+        
+        local living = GetActivePlayers()
         
         -- Check Sole Survivor / Win condition
         if #living <= 1 then
@@ -358,6 +397,11 @@ local function RunMatch(session)
             task.wait(6)
             for _, p in ipairs(Players:GetPlayers()) do
                 TeleportToLobby(p)
+                local pData = PlayerData[p.UserId]
+                if pData and not pData.IsAFK then
+                    pData.ParticipationState = "WaitingInLobby"
+                    SyncStats(p)
+                end
             end
             CleanupBots()
             ClearWinnerGlow()
@@ -375,8 +419,8 @@ local function RunMatch(session)
         print(string.format("[ROUND] HammerReveal START duration=%.1f", spawnDuration))
         local p1Start = os.clock()
         
-        -- Only teleport NON-AFK real players to the arena!
-        for _, p in ipairs(GetLivingRealPlayers()) do
+        -- Only teleport active real players to the arena!
+        for _, p in ipairs(GetActiveRealPlayers()) do
             TeleportToArena(p)
         end
         
@@ -462,6 +506,9 @@ local function RunMatch(session)
         local revealDuration = GameConfig.RevealRankingsTime or 5.0
         print(string.format("[ROUND] Rankings START duration=%.1f", revealDuration))
         local p4Start = os.clock()
+        
+        -- Re-filter active players to guarantee anyone who toggled AFK mid-round is excluded from rankings and safe count
+        living = GetActivePlayers()
         
         -- Tie-breaker sort: Bid DESC, earliest SubmitTime ASC
         table.sort(living, function(a, b)
@@ -578,11 +625,14 @@ local function RunMatch(session)
         print(string.format("[ROUND] Settlement START duration=%.1f", settlementDuration))
         local p7Start = os.clock()
         
-        for _, d in ipairs(topBidders) do
-            d.Money = math.max(0, math.floor((d.Money - d.CurrentBid) * 100) / 100)
+        for _, bInfo in ipairs(topBidders) do
+            local realData = PlayerData[bInfo.UserId]
+            if realData and not realData.IsAFK and realData.ParticipationState == "Active" then
+                realData.Money = math.max(0, math.floor((realData.Money - realData.CurrentBid) * 100) / 100)
+            end
         end
         
-        local minBid = living[#living].CurrentBid
+        local minBid = (living[#living] and living[#living].CurrentBid) or 0
         local lowestTieCount = 0
         for _, d in ipairs(living) do
             if math.abs(d.CurrentBid - minBid) < 0.001 then
@@ -603,6 +653,7 @@ local function RunMatch(session)
         for _, d in ipairs(living) do
             if d.Health <= 0 and d.IsAlive then
                 d.IsAlive = false
+                d.ParticipationState = "Eliminated"
                 table.insert(elims, d.Name .. " (Eliminated)")
                 if not d.IsBot then
                     local p = Players:GetPlayerByUserId(d.UserId)
@@ -632,7 +683,7 @@ end
 
 BidSubmitted.OnServerEvent:Connect(function(player, amount)
     local data = PlayerData[player.UserId]
-    if data and data.IsAlive and not data.IsAFK and CurrentPhase == "Phase3_Bid" then
+    if data and data.IsAlive and not data.IsAFK and data.ParticipationState == "Active" and CurrentPhase == "Phase3_Bid" then
         if data.SubmitTime ~= nil then
             return -- Only first valid bid is accepted
         end
@@ -645,39 +696,63 @@ BidSubmitted.OnServerEvent:Connect(function(player, amount)
         local elapsed = math.max(0.01, os.clock() - PhaseStartTime)
         data.SubmitTime = math.floor(elapsed * 100) / 100
         print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs", player.Name, data.CurrentBid, data.SubmitTime))
+    else
+        warn(string.format("[SECURITY] Rejected bid from inactive/AFK player %s", player.Name))
     end
 end)
 
 VoteSubmitted.OnServerEvent:Connect(function(player, targetUserId)
     local data = PlayerData[player.UserId]
-    if data and not data.IsAlive and not data.IsAFK and CurrentPhase == "Phase2_Vote" then
+    if data and not data.IsAlive and not data.IsAFK and data.ParticipationState == "Eliminated" and CurrentPhase == "Phase2_Vote" then
         local target = PlayerData[targetUserId]
-        if target and target.IsAlive then
+        if target and target.IsAlive and target.ParticipationState == "Active" then
             target.Votes = target.Votes + 1
         end
     end
 end)
 
--- AFK toggle listener (Default is ON; players toggle to OFF when ready to play)
+-- AFK toggle listener (Default is OFF upon joining; players toggle between ON/OFF)
 SetAFK.OnServerEvent:Connect(function(player, isAfk)
     local data = PlayerData[player.UserId]
-    if data then
-        data.IsAFK = (isAfk == true)
-        print(string.format("[ROUND MANAGER] %s AFK state set to: %s", player.Name, tostring(data.IsAFK)))
-        SyncStats(player)
-        if data.IsAFK then
-            TeleportToLobby(player)
-        end
+    if not data then
+        InitPlayer(player)
+        data = PlayerData[player.UserId]
     end
+    if not data then return end
+    
+    local wantAfk = (isAfk == true)
+    data.IsAFK = wantAfk
+    
+    if wantAfk then
+        data.ParticipationState = "AFK"
+        -- Clear any active round artifacts
+        data.CurrentBid = 0
+        data.SubmitTime = nil
+        if player.Character then
+            local hl = player.Character:FindFirstChild("SafeBidGlow")
+            if hl then hl:Destroy() end
+        end
+        TeleportToLobby(player)
+        print(string.format("[ROUND MANAGER] %s enabled AFK (removed from active round, moved to lobby)", player.Name))
+    else
+        -- Switched to AFK: OFF
+        -- Keep player safely in the lobby until the next eligible round admits them
+        data.ParticipationState = "WaitingInLobby"
+        TeleportToLobby(player)
+        print(string.format("[ROUND MANAGER] %s turned AFK OFF (waiting in lobby for next eligible round)", player.Name))
+    end
+    SyncStats(player)
 end)
 
 GetGameState.OnServerInvoke = function(player)
+    local pData = PlayerData[player.UserId]
     return {
         Round = CurrentRound,
         Phase = CurrentPhase,
         Timer = PhaseTimer,
         Rarity = CurrentRarity,
-        PlayerData = PlayerData[player.UserId]
+        PlayerData = pData,
+        ParticipationState = pData and pData.ParticipationState or "WaitingInLobby"
     }
 end
 
@@ -689,7 +764,8 @@ local function InitPlayer(player)
             Money = GameConfig.StartingMoney,
             Health = GameConfig.MaxHealth,
             IsAlive = true,
-            IsAFK = true, -- Default ON
+            IsAFK = false, -- Default OFF as requested
+            ParticipationState = "WaitingInLobby",
             CurrentBid = 0,
             Votes = 0,
             IsBot = false,
@@ -698,7 +774,17 @@ local function InitPlayer(player)
     end
     player.CharacterAdded:Connect(function(char)
         task.wait(0.5)
-        TeleportToLobby(player)
+        local data = PlayerData[player.UserId]
+        if not data or data.IsAFK or data.ParticipationState ~= "Active" then
+            TeleportToLobby(player)
+        else
+            -- Active player respawned after death
+            data.Health = 0
+            data.IsAlive = false
+            data.ParticipationState = "Eliminated"
+            SyncStats(player)
+            TeleportToLobby(player)
+        end
     end)
     if player.Character then
         task.spawn(function()
@@ -706,6 +792,7 @@ local function InitPlayer(player)
             TeleportToLobby(player)
         end)
     end
+    SyncStats(player)
 end
 
 for _, p in ipairs(Players:GetPlayers()) do

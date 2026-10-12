@@ -4,26 +4,38 @@
     "$className": "DataModel",
 
     "ReplicatedStorage": {
-      "Shared": {
-        "$path": "src/shared"
+      "$ignoreUnknownInstances": true,
+      "GameConfig": {
+        "$path": "src/shared/GameConfig.luau"
       }
     },
 
     "ServerScriptService": {
-      "Server": {
-        "$path": "src/server"
+      "$ignoreUnknownInstances": true,
+      "RoundManager": {
+        "$path": "src/server/RoundManager.server.luau"
       }
     },
 
-    "StarterPlayer": {
-      "StarterPlayerScripts": {
-        "Client": {
-          "$path": "src/client"
+    "StarterGui": {
+      "$ignoreUnknownInstances": true,
+      "BidToSurviveUI": {
+        "$ignoreUnknownInstances": true,
+        "ClientUIController": {
+          "$path": "src/client/ClientUIController.client.luau"
         }
       }
     },
 
+    "StarterPlayer": {
+      "$ignoreUnknownInstances": true,
+      "StarterPlayerScripts": {
+        "$ignoreUnknownInstances": true
+      }
+    },
+
     "Workspace": {
+      "$ignoreUnknownInstances": true,
       "$properties": {
         "FilteringEnabled": true
       },
@@ -51,6 +63,7 @@
       }
     },
     "Lighting": {
+      "$ignoreUnknownInstances": true,
       "$properties": {
         "Ambient": [
           0,
@@ -64,6 +77,7 @@
       }
     },
     "SoundService": {
+      "$ignoreUnknownInstances": true,
       "$properties": {
         "RespectFilteringEnabled": true
       }

@@ -18,11 +18,18 @@ local MatchOver = Network:WaitForChild("MatchOver")
 local StatsUpdated = Network:WaitForChild("StatsUpdated")
 local GetGameState = Network:WaitForChild("GetGameState")
 
+-- Ensure SetAFK RemoteEvent exists
+local SetAFK = Network:FindFirstChild("SetAFK")
+if not SetAFK then
+    SetAFK = Instance.new("RemoteEvent")
+    SetAFK.Name = "SetAFK"
+    SetAFK.Parent = Network
+end
+
 local Map = workspace:WaitForChild("BidToSurviveMap")
 local SpawnArea = Map:WaitForChild("SpawnArea")
 local GameplayArea = Map:WaitForChild("GameplayArea")
 local Walkway = GameplayArea:WaitForChild("Walkway")
-local SafeTilesFolder = GameplayArea:WaitForChild("SafeTiles")
 local Executioner = GameplayArea:FindFirstChild("Executioner")
 
 -- State Variables
@@ -34,12 +41,10 @@ local CurrentRarity = GameConfig.HammerRarities.Common
 local MatchActive = false
 local PhaseStartTime = 0
 
--- Player Data Store { [UserId] = { Money, Health, IsAlive, CurrentBid, Votes, IsBot, Name, UserId, Character, SubmitTime } }
+-- Player Data Store { [UserId] = { Money, Health, IsAlive, IsAFK, CurrentBid, Votes, IsBot, Name, UserId, Character, SubmitTime } }
 local PlayerData = {}
 local ExposedPlayerId = nil
 local ActiveBots = {}
-
-local TILE_SIZE = Vector3.new(12, 0.6, 12)
 
 --------------------------------------------------------------------------------
 -- UTILITY & STATS
@@ -48,7 +53,7 @@ local TILE_SIZE = Vector3.new(12, 0.6, 12)
 local function GetLivingPlayers()
     local living = {}
     for id, data in pairs(PlayerData) do
-        if data.IsAlive then
+        if data.IsAlive and not data.IsAFK then
             table.insert(living, data)
         end
     end
@@ -59,7 +64,7 @@ local function GetLivingRealPlayers()
     local living = {}
     for _, player in ipairs(Players:GetPlayers()) do
         local data = PlayerData[player.UserId]
-        if data and data.IsAlive then
+        if data and data.IsAlive and not data.IsAFK then
             table.insert(living, player)
         end
     end
@@ -70,7 +75,7 @@ local function GetSpectatorPlayers()
     local spectators = {}
     for _, player in ipairs(Players:GetPlayers()) do
         local data = PlayerData[player.UserId]
-        if data and not data.IsAlive then
+        if data and not data.IsAlive and not data.IsAFK then
             table.insert(spectators, player)
         end
     end
@@ -103,6 +108,7 @@ local function SyncStats(player)
             Money = data.Money,
             Health = data.Health,
             IsAlive = data.IsAlive,
+            IsAFK = data.IsAFK,
             Round = CurrentRound
         })
     end
@@ -126,7 +132,7 @@ local function TeleportCharacter(char, targetPos)
         hrp.AssemblyAngularVelocity = Vector3.zero
         char:PivotTo(CFrame.new(targetPos))
         task.wait(0.05)
-        char:PivotTo(CFrame.new(targetPos)) -- Physics sync
+        char:PivotTo(CFrame.new(targetPos))
     end
 end
 
@@ -199,6 +205,7 @@ local function CreateBotDummy(name, id, startPos)
         Money = GameConfig.StartingMoney,
         Health = GameConfig.MaxHealth,
         IsAlive = true,
+        IsAFK = false,
         CurrentBid = 0,
         Votes = 0,
         IsBot = true,
@@ -212,8 +219,8 @@ end
 
 local function SetupCompanionBots(targetTotal)
     CleanupBots()
-    local realCount = #Players:GetPlayers()
-    local botsNeeded = math.max(0, targetTotal - realCount)
+    local realActiveCount = #GetLivingRealPlayers()
+    local botsNeeded = math.max(0, targetTotal - realActiveCount)
     local botNames = {"ApeSlayer", "ShadowRunner", "LuckyBids", "AlphaTitan", "RiskHunter"}
     local wPos = Walkway.Position
     
@@ -226,112 +233,35 @@ local function SetupCompanionBots(targetTotal)
 end
 
 --------------------------------------------------------------------------------
--- SAFE TILES MANAGEMENT
+-- NEON GREEN BID WINNER GLOW SHIELD (REPLACES TILES)
 --------------------------------------------------------------------------------
 
-local function ClearSafeTiles()
-    SafeTilesFolder:ClearAllChildren()
-end
-
-local function CreateSafeTile(cframe, index)
-    local tile = Instance.new("Part")
-    tile.Name = "SafeTile_" .. index
-    tile.Size = TILE_SIZE
-    tile.CFrame = cframe
-    tile.Anchored = true
-    tile.CanCollide = true
-    tile.Material = Enum.Material.Neon
-    tile.Color = Color3.fromRGB(0, 255, 120)
-    tile.Transparency = 1
-    
-    local border = Instance.new("SelectionBox")
-    border.Color3 = Color3.fromRGB(220, 255, 220)
-    border.LineThickness = 0.08
-    border.Adornee = tile
-    border.Parent = tile
-    
-    local sg = Instance.new("SurfaceGui")
-    sg.Face = Enum.NormalId.Top
-    sg.CanvasSize = Vector2.new(256, 256)
-    sg.Parent = tile
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = "SAFE TILE\n#" .. index
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextStrokeTransparency = 0.2
-    label.TextScaled = true
-    label.Font = Enum.Font.GothamBold
-    label.Parent = sg
-    
-    tile.Parent = SafeTilesFolder
-    
-    TweenService:Create(tile, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Transparency = 0.2
-    }):Play()
-    
-    return tile
-end
-
-local function SpawnSafeTiles(count)
-    ClearSafeTiles()
-    local spawned = {}
-    local wPos = Walkway.Position
-    local minDistance = 22
-    
-    for i = 1, count do
-        local attempts = 0
-        local pos = nil
-        while attempts < 30 do
-            attempts = attempts + 1
-            local rx = math.random(-48, 48)
-            local rz = math.random(-45, 30)
-            local testPos = Vector3.new(wPos.X + rx, wPos.Y + 0.35, wPos.Z + rz)
-            
-            local tooClose = false
-            for _, existing in ipairs(spawned) do
-                if (existing.Position - testPos).Magnitude < minDistance then
-                    tooClose = true
-                    break
-                end
-            end
-            if not tooClose then
-                pos = testPos
-                break
-            end
-        end
-        
-        pos = pos or Vector3.new(wPos.X + (i * 18 - 36), wPos.Y + 0.35, wPos.Z)
-        local tile = CreateSafeTile(CFrame.new(pos), i)
-        table.insert(spawned, tile)
-    end
-    
-    return spawned
-end
-
-local function IsPositionOnSafeTile(pos)
-    for _, tile in ipairs(SafeTilesFolder:GetChildren()) do
-        if tile:IsA("BasePart") then
-            local tPos = tile.Position
-            local tSize = tile.Size
-            local inX = math.abs(pos.X - tPos.X) <= (tSize.X / 2 + 1.5)
-            local inZ = math.abs(pos.Z - tPos.Z) <= (tSize.Z / 2 + 1.5)
-            local inY = (pos.Y >= tPos.Y - 1.5) and (pos.Y <= tPos.Y + 7)
-            if inX and inZ and inY then
-                return true
-            end
+local function ClearWinnerGlow()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character then
+            local hl = player.Character:FindFirstChild("SafeBidGlow")
+            if hl then hl:Destroy() end
         end
     end
-    return false
+    for _, bot in ipairs(ActiveBots) do
+        if bot.Character then
+            local hl = bot.Character:FindFirstChild("SafeBidGlow")
+            if hl then hl:Destroy() end
+        end
+    end
 end
 
-local function IsPlayerOnSafeTile(player)
-    local char = player.Character
-    if not char then return false end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    return IsPositionOnSafeTile(hrp.Position)
+local function ApplyWinnerGlow(char)
+    if not char then return end
+    local old = char:FindFirstChild("SafeBidGlow")
+    if old then old:Destroy() end
+    local hl = Instance.new("Highlight")
+    hl.Name = "SafeBidGlow"
+    hl.FillColor = Color3.fromRGB(0, 255, 120)
+    hl.OutlineColor = Color3.fromRGB(220, 255, 230)
+    hl.FillTransparency = 0.25
+    hl.OutlineTransparency = 0
+    hl.Parent = char
 end
 
 --------------------------------------------------------------------------------
@@ -379,16 +309,18 @@ end
 local function InitMatch()
     CurrentRound = 0
     MatchActive = true
-    PlayerData = {}
     ExposedPlayerId = nil
     
     for _, player in ipairs(Players:GetPlayers()) do
+        local existing = PlayerData[player.UserId]
+        local isAfk = (existing ~= nil) and existing.IsAFK or true -- AFK default ON
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
-            Money = GameConfig.StartingMoney,
-            Health = GameConfig.MaxHealth,
+            Money = (existing and existing.Money) or GameConfig.StartingMoney,
+            Health = (existing and existing.Health) or GameConfig.MaxHealth,
             IsAlive = true,
+            IsAFK = isAfk,
             CurrentBid = 0,
             Votes = 0,
             IsBot = false,
@@ -396,13 +328,9 @@ local function InitMatch()
         }
     end
     
-    local totalReal = #Players:GetPlayers()
-    if totalReal < 4 then
-        SetupCompanionBots(4)
-    end
-    
+    SetupCompanionBots(4)
     SyncAllStats()
-    ClearSafeTiles()
+    ClearWinnerGlow()
 end
 
 local function RunMatch(session)
@@ -432,6 +360,7 @@ local function RunMatch(session)
                 TeleportToLobby(p)
             end
             CleanupBots()
+            ClearWinnerGlow()
             MatchActive = false
             break
         end
@@ -446,10 +375,12 @@ local function RunMatch(session)
         print(string.format("[ROUND] HammerReveal START duration=%.1f", spawnDuration))
         local p1Start = os.clock()
         
+        -- Only teleport NON-AFK real players to the arena!
         for _, p in ipairs(GetLivingRealPlayers()) do
             TeleportToArena(p)
         end
         
+        -- Reset bots to arena
         local wPos = Walkway.Position
         for i, b in ipairs(ActiveBots) do
             if b.IsAlive and b.Character then
@@ -526,7 +457,7 @@ local function RunMatch(session)
         print(string.format("[ROUND] Bidding END elapsed=%.2f", os.clock() - PhaseStartTime))
         
         ------------------------------------------------------------------------
-        -- PHASE 4: REVEAL THE RANKINGS (Exactly 5 Seconds)
+        -- PHASE 4: REVEAL THE RANKINGS & APPLY NEON GREEN SHIELD GLOW
         ------------------------------------------------------------------------
         local revealDuration = GameConfig.RevealRankingsTime or 5.0
         print(string.format("[ROUND] Rankings START duration=%.1f", revealDuration))
@@ -561,6 +492,19 @@ local function RunMatch(session)
             end
         end
         
+        -- Apply vibrant neon green glow to all winning bid characters!
+        ClearWinnerGlow()
+        for _, bidder in ipairs(topBidders) do
+            if bidder.IsBot and bidder.Character then
+                ApplyWinnerGlow(bidder.Character)
+            else
+                local p = Players:GetPlayerByUserId(bidder.UserId)
+                if p and p.Character then
+                    ApplyWinnerGlow(p.Character)
+                end
+            end
+        end
+        
         RankingsRevealed:FireAllClients({
             Duration = revealDuration,
             TopBidders = topBidders,
@@ -575,32 +519,18 @@ local function RunMatch(session)
         print(string.format("[ROUND] Rankings END elapsed=%.2f", os.clock() - p4Start))
         
         ------------------------------------------------------------------------
-        -- PHASE 5: THE SCRAMBLE (Safe Tiles appear, 9s Scramble)
+        -- PHASE 5: THE SURVIVAL STANCE (Neon Green Shield Visible, 9s)
         ------------------------------------------------------------------------
         local scrambleDuration = GameConfig.ScrambleTime or 9.0
-        print(string.format("[ROUND] TileScramble START duration=%.1f", scrambleDuration))
+        print(string.format("[ROUND] SurvivalStance START duration=%.1f", scrambleDuration))
         local p5Start = os.clock()
         
-        local tiles = SpawnSafeTiles(safeCount)
         BroadcastState("Phase5_Scramble", scrambleDuration, { SafeCount = safeCount })
-        
-        for i, bData in ipairs(topBidders) do
-            if bData.IsBot and bData.Character and tiles[i] then
-                task.spawn(function()
-                    task.wait(math.random(1, 3))
-                    local bHum = bData.Character:FindFirstChildOfClass("Humanoid")
-                    if bHum then
-                        bHum:MoveTo(tiles[i].Position + Vector3.new(math.random(-2, 2), 0, math.random(-2, 2)))
-                    end
-                end)
-            end
-        end
-        
         task.wait(scrambleDuration)
-        print(string.format("[ROUND] TileScramble END elapsed=%.2f", os.clock() - p5Start))
+        print(string.format("[ROUND] SurvivalStance END elapsed=%.2f", os.clock() - p5Start))
         
         ------------------------------------------------------------------------
-        -- PHASE 6: HAMMER SMASH (3 Seconds)
+        -- PHASE 6: HAMMER SMASH (Neon Shield Protects Winners)
         ------------------------------------------------------------------------
         print("[ROUND] HammerSmash START duration=3")
         local p6Start = os.clock()
@@ -611,10 +541,11 @@ local function RunMatch(session)
         
         local dmg = math.floor((GameConfig.MaxHealth * CurrentRarity.DamagePercent) / 100)
         
+        -- Real non-AFK players
         for _, player in ipairs(GetLivingRealPlayers()) do
             local pData = PlayerData[player.UserId]
-            local onSafe = IsPlayerOnSafeTile(player)
-            if not onSafe then
+            local isProtected = (player.Character and player.Character:FindFirstChild("SafeBidGlow") ~= nil)
+            if not isProtected then
                 pData.Health = math.max(0, pData.Health - dmg)
                 local char = player.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -624,11 +555,11 @@ local function RunMatch(session)
             end
         end
         
+        -- Bot players
         for _, bData in ipairs(living) do
             if bData.IsBot and bData.Character then
-                local hrp = bData.Character:FindFirstChild("HumanoidRootPart")
-                local onSafe = hrp and IsPositionOnSafeTile(hrp.Position)
-                if not onSafe then
+                local isProtected = (bData.Character:FindFirstChild("SafeBidGlow") ~= nil)
+                if not isProtected then
                     bData.Health = math.max(0, bData.Health - dmg)
                     local hum = bData.Character:FindFirstChildOfClass("Humanoid")
                     if hum then hum.Health = bData.Health end
@@ -637,7 +568,7 @@ local function RunMatch(session)
         end
         
         task.wait(1.5)
-        ClearSafeTiles()
+        ClearWinnerGlow()
         print(string.format("[ROUND] HammerSmash END elapsed=%.2f", os.clock() - p6Start))
         
         ------------------------------------------------------------------------
@@ -701,13 +632,13 @@ end
 
 BidSubmitted.OnServerEvent:Connect(function(player, amount)
     local data = PlayerData[player.UserId]
-    if data and data.IsAlive and CurrentPhase == "Phase3_Bid" then
+    if data and data.IsAlive and not data.IsAFK and CurrentPhase == "Phase3_Bid" then
         if data.SubmitTime ~= nil then
             return -- Only first valid bid is accepted
         end
         local bid = tonumber(amount)
         if not bid or bid ~= bid or bid < 0 or bid > data.Money then
-            return -- Reject invalid, negative, NaN or unaffordable bids
+            return
         end
         bid = math.floor(bid * 100) / 100
         data.CurrentBid = bid
@@ -719,10 +650,23 @@ end)
 
 VoteSubmitted.OnServerEvent:Connect(function(player, targetUserId)
     local data = PlayerData[player.UserId]
-    if data and not data.IsAlive and CurrentPhase == "Phase2_Vote" then
+    if data and not data.IsAlive and not data.IsAFK and CurrentPhase == "Phase2_Vote" then
         local target = PlayerData[targetUserId]
         if target and target.IsAlive then
             target.Votes = target.Votes + 1
+        end
+    end
+end)
+
+-- AFK toggle listener (Default is ON; players toggle to OFF when ready to play)
+SetAFK.OnServerEvent:Connect(function(player, isAfk)
+    local data = PlayerData[player.UserId]
+    if data then
+        data.IsAFK = (isAfk == true)
+        print(string.format("[ROUND MANAGER] %s AFK state set to: %s", player.Name, tostring(data.IsAFK)))
+        SyncStats(player)
+        if data.IsAFK then
+            TeleportToLobby(player)
         end
     end
 end)
@@ -737,11 +681,40 @@ GetGameState.OnServerInvoke = function(player)
     }
 end
 
-Players.PlayerAdded:Connect(function(player)
+local function InitPlayer(player)
+    if not PlayerData[player.UserId] then
+        PlayerData[player.UserId] = {
+            UserId = player.UserId,
+            Name = player.DisplayName,
+            Money = GameConfig.StartingMoney,
+            Health = GameConfig.MaxHealth,
+            IsAlive = true,
+            IsAFK = true, -- Default ON
+            CurrentBid = 0,
+            Votes = 0,
+            IsBot = false,
+            Character = player.Character
+        }
+    end
     player.CharacterAdded:Connect(function(char)
         task.wait(0.5)
         TeleportToLobby(player)
     end)
+    if player.Character then
+        task.spawn(function()
+            task.wait(0.5)
+            TeleportToLobby(player)
+        end)
+    end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    InitPlayer(p)
+end
+Players.PlayerAdded:Connect(InitPlayer)
+
+Players.PlayerRemoving:Connect(function(player)
+    PlayerData[player.UserId] = nil
 end)
 
 -- Main Server Lifecycle Loop

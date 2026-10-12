@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
+local ContentProvider = game:GetService("ContentProvider")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
@@ -21,6 +22,14 @@ local HammerSmash = Network:WaitForChild("HammerSmash")
 local RoundOver = Network:WaitForChild("RoundOver")
 local MatchOver = Network:WaitForChild("MatchOver")
 local StatsUpdated = Network:WaitForChild("StatsUpdated")
+
+-- RemoteEvent for AFK toggle
+local SetAFK = Network:FindFirstChild("SetAFK")
+if not SetAFK then
+    SetAFK = Instance.new("RemoteEvent")
+    SetAFK.Name = "SetAFK"
+    SetAFK.Parent = Network
+end
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -58,12 +67,33 @@ local screenFlash = gui:WaitForChild("ScreenFlash")
 local CurrentMoney = GameConfig.StartingMoney or 20.00
 local CurrentHealth = GameConfig.MaxHealth or 100
 local IsAlive = true
+local IsAFK = true -- Default ON as requested
 local CurrentPhaseDeadline = 0
 local HasSubmitted = false
 local IsRoulettePlaying = false
 
+-- Known verified base hammer asset (Rare is 100% loaded and verified on Roblox CDN)
+local VERIFIED_BASE_HAMMER = "rbxassetid://130593511073820"
+local PendingAssets = {}
+
+-- Preload probe for all rarity assets
+task.spawn(function()
+    for _, rarityName in ipairs(GameConfig.RarityOrder) do
+        local rData = GameConfig.HammerRarities[rarityName]
+        if rData and rData.AssetId then
+            local testImg = Instance.new("ImageLabel")
+            testImg.Image = rData.AssetId
+            ContentProvider:PreloadAsync({testImg}, function(assetId, status)
+                if status == Enum.AssetFetchStatus.Failure then
+                    PendingAssets[assetId] = true
+                end
+            end)
+        end
+    end
+end)
+
 --------------------------------------------------------------------------------
--- 1. HUD STYLING (HEALTH BAR & MONEY BOX)
+-- 1. HUD STYLING (HEALTH BAR, MONEY BOX & AFK BUTTON)
 --------------------------------------------------------------------------------
 statsCard.BackgroundTransparency = 1
 local oldCardStroke = statsCard:FindFirstChildOfClass("UIStroke")
@@ -142,7 +172,119 @@ if rarityBadge then
 end
 
 --------------------------------------------------------------------------------
--- 2. HAMMER ROULETTE (ONE SINGLE FLOATING ICON WITH DECELERATION)
+-- AFK BUTTON ON LEFT SIDE (DEFAULT ON)
+--------------------------------------------------------------------------------
+local afkButton = gui:FindFirstChild("AFKButton") or Instance.new("TextButton")
+afkButton.Name = "AFKButton"
+afkButton.Size = UDim2.new(0, 175, 0, 36)
+afkButton.Position = UDim2.new(0, 20, 1, -165)
+afkButton.BackgroundColor3 = Color3.fromRGB(24, 18, 14)
+afkButton.Font = Enum.Font.GothamBold
+afkButton.TextSize = 13
+afkButton.ZIndex = 20
+afkButton.AutoButtonColor = false
+
+local afkCorner = afkButton:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+afkCorner.CornerRadius = UDim.new(0, 6)
+afkCorner.Parent = afkButton
+
+local afkStroke = afkButton:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
+afkStroke.Color = Color3.fromRGB(240, 150, 30)
+afkStroke.Thickness = 1.5
+afkStroke.Parent = afkButton
+
+local function UpdateAFKVisual()
+    if IsAFK then
+        afkButton.BackgroundColor3 = Color3.fromRGB(28, 18, 12)
+        afkButton.TextColor3 = Color3.fromRGB(255, 175, 50)
+        afkButton.Text = "💤 AFK: ON (Click to Play)"
+        afkStroke.Color = Color3.fromRGB(240, 150, 30)
+    else
+        afkButton.BackgroundColor3 = Color3.fromRGB(14, 28, 18)
+        afkButton.TextColor3 = Color3.fromRGB(60, 230, 110)
+        afkButton.Text = "⚔️ READY (In Game)"
+        afkStroke.Color = Color3.fromRGB(40, 210, 95)
+    end
+end
+
+UpdateAFKVisual()
+afkButton.Parent = gui
+
+-- Initialize server state to AFK ON
+task.spawn(function()
+    task.wait(0.5)
+    SetAFK:FireServer(true)
+end)
+
+afkButton.MouseButton1Click:Connect(function()
+    IsAFK = not IsAFK
+    UpdateAFKVisual()
+    SetAFK:FireServer(IsAFK)
+end)
+
+--------------------------------------------------------------------------------
+-- REOPEN BUTTONS (MIDDLE AND LITTLE TOP)
+--------------------------------------------------------------------------------
+local reopenContainer = gui:FindFirstChild("ReopenContainer") or Instance.new("Frame")
+reopenContainer.Name = "ReopenContainer"
+reopenContainer.Size = UDim2.new(0, 320, 0, 34)
+reopenContainer.Position = UDim2.new(0.5, -160, 0, 96)
+reopenContainer.BackgroundTransparency = 1
+reopenContainer.ZIndex = 35
+reopenContainer.Parent = gui
+
+local reopenBidBtn = reopenContainer:FindFirstChild("ReopenBidBtn") or Instance.new("TextButton")
+reopenBidBtn.Name = "ReopenBidBtn"
+reopenBidBtn.Size = UDim2.new(0, 150, 0, 32)
+reopenBidBtn.Position = UDim2.new(0, 0, 0, 0)
+reopenBidBtn.BackgroundColor3 = Color3.fromRGB(16, 24, 20)
+reopenBidBtn.Text = "💵 OPEN BID CARD"
+reopenBidBtn.TextColor3 = Color3.fromRGB(60, 220, 110)
+reopenBidBtn.Font = Enum.Font.GothamBold
+reopenBidBtn.TextSize = 12
+reopenBidBtn.Visible = false
+reopenBidBtn.ZIndex = 36
+local rbbCorner = Instance.new("UICorner")
+rbbCorner.CornerRadius = UDim.new(0, 6)
+rbbCorner.Parent = reopenBidBtn
+local rbbStroke = Instance.new("UIStroke")
+rbbStroke.Color = Color3.fromRGB(40, 180, 90)
+rbbStroke.Thickness = 1
+rbbStroke.Parent = reopenBidBtn
+reopenBidBtn.Parent = reopenContainer
+
+local reopenRankBtn = reopenContainer:FindFirstChild("ReopenRankBtn") or Instance.new("TextButton")
+reopenRankBtn.Name = "ReopenRankBtn"
+reopenRankBtn.Size = UDim2.new(0, 150, 0, 32)
+reopenRankBtn.Position = UDim2.new(0, 160, 0, 0)
+reopenRankBtn.BackgroundColor3 = Color3.fromRGB(16, 22, 32)
+reopenRankBtn.Text = "🏆 LEADERBOARD"
+reopenRankBtn.TextColor3 = Color3.fromRGB(0, 210, 255)
+reopenRankBtn.Font = Enum.Font.GothamBold
+reopenRankBtn.TextSize = 12
+reopenRankBtn.Visible = false
+reopenRankBtn.ZIndex = 36
+local rrbCorner = Instance.new("UICorner")
+rrbCorner.CornerRadius = UDim.new(0, 6)
+rrbCorner.Parent = reopenRankBtn
+local rrbStroke = Instance.new("UIStroke")
+rrbStroke.Color = Color3.fromRGB(0, 180, 220)
+rrbStroke.Thickness = 1
+rrbStroke.Parent = reopenRankBtn
+reopenRankBtn.Parent = reopenContainer
+
+reopenBidBtn.MouseButton1Click:Connect(function()
+    biddingModal.Visible = true
+    reopenBidBtn.Visible = false
+end)
+
+reopenRankBtn.MouseButton1Click:Connect(function()
+    rankingsModal.Visible = true
+    reopenRankBtn.Visible = false
+end)
+
+--------------------------------------------------------------------------------
+-- 2. HAMMER ROULETTE (GUARANTEED 100% VISIBLE WITH WORKING ASSET FALLBACK)
 --------------------------------------------------------------------------------
 local rouletteContainer = gui:FindFirstChild("RouletteContainer") or Instance.new("Frame")
 rouletteContainer.Name = "RouletteContainer"
@@ -153,7 +295,6 @@ rouletteContainer.Visible = false
 rouletteContainer.ZIndex = 30
 rouletteContainer.Parent = gui
 
--- Soft neon glow halo behind hammer
 local glowHalo = rouletteContainer:FindFirstChild("GlowHalo") or Instance.new("ImageLabel")
 glowHalo.Name = "GlowHalo"
 glowHalo.Size = UDim2.new(0, 280, 0, 280)
@@ -164,7 +305,6 @@ glowHalo.ImageTransparency = 0.4
 glowHalo.ZIndex = 31
 glowHalo.Parent = rouletteContainer
 
--- Centered floating hammer icon (Prominent, High-Res)
 local hammerIcon = rouletteContainer:FindFirstChild("HammerIcon") or Instance.new("ImageLabel")
 hammerIcon.Name = "HammerIcon"
 hammerIcon.Size = UDim2.new(0, 220, 0, 220)
@@ -174,7 +314,6 @@ hammerIcon.ScaleType = Enum.ScaleType.Fit
 hammerIcon.ZIndex = 33
 hammerIcon.Parent = rouletteContainer
 
--- Rarity text below hammer
 local rarityTitle = rouletteContainer:FindFirstChild("RarityTitle") or Instance.new("TextLabel")
 rarityTitle.Name = "RarityTitle"
 rarityTitle.Size = UDim2.new(1, 0, 0, 32)
@@ -188,7 +327,6 @@ rarityTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 rarityTitle.ZIndex = 33
 rarityTitle.Parent = rouletteContainer
 
--- Damage % label
 local damageTitle = rouletteContainer:FindFirstChild("DamageTitle") or Instance.new("TextLabel")
 damageTitle.Name = "DamageTitle"
 damageTitle.Size = UDim2.new(1, 0, 0, 22)
@@ -205,10 +343,19 @@ damageTitle.Parent = rouletteContainer
 
 local function SetHammerVisual(rarityData)
     if not rarityData then return end
-    hammerIcon.Image = rarityData.AssetId or ""
+    
+    -- If the specific asset failed preload or is pending moderation, seamlessly fall back to verified base asset
+    local assetId = rarityData.AssetId
+    if not assetId or assetId == "" or PendingAssets[assetId] then
+        assetId = VERIFIED_BASE_HAMMER
+    end
+    
+    hammerIcon.Image = assetId
+    -- Color tint ensures every single tier is vividly distinguished
+    hammerIcon.ImageColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
     glowHalo.ImageColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
     rarityTitle.Text = string.format("🔨 %s HAMMER", (rarityData.Name or "COMMON"):upper())
-    rarityTitle.TextColor3 = rarityData.Color or Color3.fromRGB(255, 255, 255)
+    rarityTitle.TextColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
     damageTitle.Text = string.format("DEALS %d%% HP DAMAGE", rarityData.DamagePercent or 30)
 end
 
@@ -223,9 +370,6 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
     damageTitle.TextTransparency = 0
     
     local rarities = GameConfig.GetRarityList()
-    
-    -- Smooth 19-step deceleration sequence totaling ~5.7 seconds
-    -- Starts at 100ms (cleanly legible) and eases smoothly up to 850ms
     local delays = {
         0.10, 0.10, 0.11, 0.11, 0.12, 0.13, 0.14, 0.16,
         0.18, 0.20, 0.23, 0.27, 0.31, 0.36, 0.42, 0.50,
@@ -238,7 +382,6 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
         local r = rarities[currentIdx]
         SetHammerVisual(r)
         
-        -- Subtle rhythmic tilt and pulse
         local tiltAngle = (i % 2 == 0) and 4 or -4
         hammerIcon.Rotation = tiltAngle
         
@@ -261,7 +404,6 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
     SetHammerVisual(targetRarity)
     hammerIcon.Rotation = 0
     
-    -- Impact punch bounce
     TweenService:Create(hammerIcon, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, 260, 0, 260),
         Position = UDim2.new(0.5, -130, 0, 10)
@@ -273,10 +415,8 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
         Position = UDim2.new(0.5, -160, 0, -15)
     }):Play()
     
-    -- Hold final hammer visible for 1.5 seconds
     task.wait(1.5)
     
-    -- Clean fade-out into Bidding phase
     TweenService:Create(hammerIcon, TweenInfo.new(0.4), {
         ImageTransparency = 1,
         Size = UDim2.new(0, 190, 0, 190)
@@ -342,11 +482,15 @@ StateChanged.OnClientEvent:Connect(function(data)
     CurrentPhaseDeadline = data.Deadline or (os.clock() + (data.Duration or 0))
     roundLabel.Text = string.format("ROUND %d • %d ALIVE", round, living)
     
+    -- Auto-hide reopen buttons when switching phases
+    reopenBidBtn.Visible = false
+    reopenRankBtn.Visible = false
+    
     if phase == "Intermission" then
         topBanner.Visible = true
         phaseTitle.Text = "LOBBY COUNTDOWN"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
-        infoLabel.Text = "Match starting shortly... Preparing arena"
+        infoLabel.Text = "Match starting shortly... Toggle AFK to enter play area"
         biddingModal.Visible = false
         rankingsModal.Visible = false
         voteModal.Visible = false
@@ -384,12 +528,11 @@ StateChanged.OnClientEvent:Connect(function(data)
             infoLabel.Text = string.format("⚠️ ALERT: %s was voted! Their bid will be EXPOSED!", data.ExposedPlayer)
             infoLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
         else
-            infoLabel.Text = "Enter your secret bid! Top 50% earn green safe tiles."
+            infoLabel.Text = "Enter your secret bid! Top 50% glow neon green and survive!"
             infoLabel.TextColor3 = Color3.fromRGB(160, 175, 200)
         end
         
     elseif phase == "Phase4_Reveal" then
-        -- TopBanner is hidden so RankingsModal becomes the sole dominant header
         topBanner.Visible = false
         biddingModal.Visible = false
         
@@ -397,21 +540,21 @@ StateChanged.OnClientEvent:Connect(function(data)
         topBanner.Visible = true
         rankingsModal.Visible = false
         biddingModal.Visible = false
-        phaseTitle.Text = "PHASE 5 — THE SCRAMBLE!"
+        phaseTitle.Text = "PHASE 5 — NEON SHIELD ACTIVE!"
         phaseTitle.TextColor3 = Color3.fromRGB(85, 255, 127)
-        infoLabel.Text = "RUN TO A GREEN SAFE TILE BEFORE IMPACT!"
+        infoLabel.Text = "WINNING BIDDERS GLOW NEON GREEN AND ARE SHIELDED FROM DAMAGE!"
         
     elseif phase == "Phase6_Smash" then
         topBanner.Visible = true
         phaseTitle.Text = "PHASE 6 — HAMMER SMASH!"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 50, 50)
-        infoLabel.Text = "BRACE FOR IMPACT!"
+        infoLabel.Text = "BRACE FOR IMPACT! NON-GLOWING PLAYERS TAKE DAMAGE!"
         
     elseif phase == "Phase7_Settlement" then
         topBanner.Visible = true
         phaseTitle.Text = "PHASE 7 — SETTLEMENT"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
-        infoLabel.Text = "Bids processed. Checking health..."
+        infoLabel.Text = "Bids processed. Checking survival status..."
         
     elseif phase == "MatchOver" then
         topBanner.Visible = true
@@ -426,16 +569,38 @@ StateChanged.OnClientEvent:Connect(function(data)
 end)
 
 --------------------------------------------------------------------------------
--- 6. BIDDING MODAL (PRESERVED FUNCTIONALITY & FULL-DURATION DISPLAY)
+-- 6. BIDDING MODAL (WITH RED X CLOSE BUTTON & REOPEN BUTTON)
 --------------------------------------------------------------------------------
+-- Attach Red X Close Button to BiddingModal
+local closeBidBtn = biddingModal:FindFirstChild("CloseBidBtn") or Instance.new("TextButton")
+closeBidBtn.Name = "CloseBidBtn"
+closeBidBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBidBtn.Position = UDim2.new(1, -34, 0, 8)
+closeBidBtn.BackgroundColor3 = Color3.fromRGB(220, 45, 55)
+closeBidBtn.Text = "✕"
+closeBidBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBidBtn.Font = Enum.Font.GothamBold
+closeBidBtn.TextSize = 14
+closeBidBtn.ZIndex = 25
+local cbbCorner = Instance.new("UICorner")
+cbbCorner.CornerRadius = UDim.new(0, 13)
+cbbCorner.Parent = closeBidBtn
+closeBidBtn.Parent = biddingModal
+
+closeBidBtn.MouseButton1Click:Connect(function()
+    biddingModal.Visible = false
+    reopenBidBtn.Visible = true
+end)
+
 PromptBid.OnClientEvent:Connect(function(data)
-    if not IsAlive then return end
+    if not IsAlive or IsAFK then return end
     HasSubmitted = false
     bidInput.Text = ""
     submittedNotice.Text = ""
     submitBtn.Text = "SUBMIT BID"
     submitBtn.BackgroundColor3 = Color3.fromRGB(0, 175, 90)
     biddingModal.Visible = true
+    reopenBidBtn.Visible = false
 end)
 
 local function setBidFraction(frac)
@@ -467,18 +632,15 @@ submitBtn.MouseButton1Click:Connect(function()
     submitBtn.Text = "BID SUBMITTED!"
     submitBtn.BackgroundColor3 = Color3.fromRGB(48, 56, 72)
     submittedNotice.Text = string.format("Secret Bid Registered: $%.2f", val)
-    -- Remains visible cleanly until Phase 4 begins
 end)
 
 --------------------------------------------------------------------------------
--- 7. LEADERBOARD: PREMIUM CONTENT-ADAPTIVE 4-COLUMN TABLE
+-- 7. LEADERBOARD: PREMIUM CONTENT-ADAPTIVE 4-COLUMN TABLE WITH RED X
 --------------------------------------------------------------------------------
 -- Columns: SI.NO | PLAYER NAME | BID | TIME
 RankingsRevealed.OnClientEvent:Connect(function(data)
-    -- Hide competing TopBanner so Leaderboard is the sole dominant UI element
     topBanner.Visible = false
     
-    -- Combine top & bottom bidders in rank order
     local allBidders = {}
     local safeCount = data.SafeCount or 1
     for _, p in ipairs(data.TopBidders or {}) do table.insert(allBidders, p) end
@@ -489,7 +651,6 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     local rowPadding = 4
     local tableContentHeight = rowCount * (rowHeight + rowPadding)
     
-    -- Dynamic height: header (92px) + content + bottom padding (16px)
     local desiredHeight = 96 + tableContentHeight + 16
     local modalHeight = math.clamp(desiredHeight, 220, 390)
     
@@ -507,6 +668,27 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     mStroke.Thickness = 1
     mStroke.Parent = rankingsModal
     
+    -- Red X Close Button for RankingsModal
+    local closeRankBtn = rankingsModal:FindFirstChild("CloseRankBtn") or Instance.new("TextButton")
+    closeRankBtn.Name = "CloseRankBtn"
+    closeRankBtn.Size = UDim2.new(0, 26, 0, 26)
+    closeRankBtn.Position = UDim2.new(1, -34, 0, 8)
+    closeRankBtn.BackgroundColor3 = Color3.fromRGB(220, 45, 55)
+    closeRankBtn.Text = "✕"
+    closeRankBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeRankBtn.Font = Enum.Font.GothamBold
+    closeRankBtn.TextSize = 14
+    closeRankBtn.ZIndex = 30
+    local crbCorner = Instance.new("UICorner")
+    crbCorner.CornerRadius = UDim.new(0, 13)
+    crbCorner.Parent = closeRankBtn
+    closeRankBtn.Parent = rankingsModal
+    
+    closeRankBtn.MouseButton1Click:Connect(function()
+        rankingsModal.Visible = false
+        reopenRankBtn.Visible = true
+    end)
+    
     -- Clear previous dynamic contents
     for _, child in ipairs(rankingsModal:GetChildren()) do
         if child.Name == "HeaderFrame" or child.Name == "LeaderboardScroll" or child.Name == "TitleHeader" then
@@ -516,10 +698,10 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
         end
     end
     
-    -- Integrated Title Header Container (no competing banners)
+    -- Integrated Title Header Container
     local titleHeader = Instance.new("Frame")
     titleHeader.Name = "TitleHeader"
-    titleHeader.Size = UDim2.new(1, -24, 0, 50)
+    titleHeader.Size = UDim2.new(1, -60, 0, 50)
     titleHeader.Position = UDim2.new(0, 12, 0, 10)
     titleHeader.BackgroundTransparency = 1
     titleHeader.Parent = rankingsModal
@@ -565,7 +747,7 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     subLabel.Size = UDim2.new(1, 0, 0, 16)
     subLabel.Position = UDim2.new(0, 0, 0, 46)
     subLabel.BackgroundTransparency = 1
-    subLabel.Text = "Top 50% earn safe tile access • Earliest submission wins tie-breakers"
+    subLabel.Text = "Top 50% glow neon green & survive • Earliest submission wins tie-breakers"
     subLabel.Font = Enum.Font.GothamMedium
     subLabel.TextSize = 11
     subLabel.TextColor3 = Color3.fromRGB(150, 165, 185)
@@ -603,7 +785,7 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     makeHeaderCell("TIME", UDim2.new(0.20, -12, 1, 0), UDim2.new(0.80, 0, 0, 0), Enum.TextXAlignment.Right)
     headerFrame.Parent = rankingsModal
     
-    -- Scrolling Container for Rows (Scrolls if > 6 players)
+    -- Scrolling Container for Rows
     local scroll = Instance.new("ScrollingFrame")
     scroll.Name = "LeaderboardScroll"
     scroll.Size = UDim2.new(1, -24, 1, -104)
@@ -692,13 +874,14 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     
     scroll.Parent = rankingsModal
     rankingsModal.Visible = true
+    reopenRankBtn.Visible = false
 end)
 
 --------------------------------------------------------------------------------
 -- 8. SPECTATOR VOTE POPULATOR
 --------------------------------------------------------------------------------
 PromptVote.OnClientEvent:Connect(function(data)
-    if IsAlive then return end
+    if IsAlive or IsAFK then return end
     for _, c in ipairs(candidateContainer:GetChildren()) do
         if c:IsA("Frame") then c:Destroy() end
     end

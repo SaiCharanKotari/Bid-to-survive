@@ -31,8 +31,9 @@ local CurrentPhase = "Intermission"
 local PhaseTimer = 0
 local CurrentRarity = GameConfig.HammerRarities.Common
 local MatchActive = false
+local PhaseStartTime = 0
 
--- Player Data Store { [UserId] = { Money, Health, IsAlive, CurrentBid, Votes, IsBot, Name, UserId, Character } }
+-- Player Data Store { [UserId] = { Money, Health, IsAlive, CurrentBid, Votes, IsBot, Name, UserId, Character, SubmitTime } }
 local PlayerData = {}
 local ExposedPlayerId = nil
 local ActiveBots = {}
@@ -449,8 +450,8 @@ local function RunMatch()
             end
         end
         
-        BroadcastState("Phase1_Spawn", 3, { Round = CurrentRound, Rarity = CurrentRarity })
-        task.wait(3)
+        BroadcastState("Phase1_Spawn", 3, { Round = CurrentRound, Rarity = CurrentRarity, RouletteDuration = GameConfig.RouletteDuration or 3.2 })
+        task.wait(3.5)
         
         ------------------------------------------------------------------------
         -- PHASE 2: ANONYMOUS VOTE (From Round 2+ if spectators exist)
@@ -483,11 +484,14 @@ local function RunMatch()
         ------------------------------------------------------------------------
         -- PHASE 3: BID FOR SURVIVAL (10 Seconds)
         ------------------------------------------------------------------------
+        PhaseStartTime = os.clock()
         for _, d in ipairs(living) do
             d.CurrentBid = 0
+            d.SubmitTime = nil
             if d.IsBot then
                 local maxB = math.min(d.Money, math.random(15, 65) / 10)
                 d.CurrentBid = math.floor(maxB * 10) / 10
+                d.SubmitTime = math.random(80, 750) / 100
             end
         end
         
@@ -502,7 +506,11 @@ local function RunMatch()
         -- PHASE 4: REVEAL THE RANKINGS (5 Seconds)
         ------------------------------------------------------------------------
         table.sort(living, function(a, b)
-            return a.CurrentBid > b.CurrentBid
+            if math.abs(a.CurrentBid - b.CurrentBid) > 0.001 then
+                return a.CurrentBid > b.CurrentBid
+            end
+            -- Earlier submission timestamp ranks higher
+            return (a.SubmitTime or 999) < (b.SubmitTime or 999)
         end)
         
         local safeCount = math.max(1, math.ceil(#living * 0.5))
@@ -510,10 +518,19 @@ local function RunMatch()
         local bottomBidders = {}
         
         for i, d in ipairs(living) do
+            local bidderInfo = {
+                UserId = d.UserId,
+                Name = d.Name,
+                CurrentBid = d.CurrentBid,
+                SubmitTime = d.SubmitTime or 10.00,
+                IsBot = d.IsBot,
+                Money = d.Money,
+                Health = d.Health
+            }
             if i <= safeCount then
-                table.insert(topBidders, d)
+                table.insert(topBidders, bidderInfo)
             else
-                table.insert(bottomBidders, d)
+                table.insert(bottomBidders, bidderInfo)
             end
         end
         
@@ -649,10 +666,18 @@ end
 BidSubmitted.OnServerEvent:Connect(function(player, amount)
     local data = PlayerData[player.UserId]
     if data and data.IsAlive and CurrentPhase == "Phase3_Bid" then
-        local bid = tonumber(amount) or 0
-        bid = math.clamp(bid, 0, data.Money)
-        data.CurrentBid = math.floor(bid * 100) / 100
-        print(string.format("[ROUND MANAGER] %s placed bid: $%.2f", player.Name, data.CurrentBid))
+        if data.SubmitTime ~= nil then
+            return -- Only first valid bid is accepted
+        end
+        local bid = tonumber(amount)
+        if not bid or bid ~= bid or bid < 0 or bid > data.Money then
+            return -- Reject non-numeric, negative, NaN or unaffordable bids
+        end
+        bid = math.floor(bid * 100) / 100
+        data.CurrentBid = bid
+        local elapsed = math.max(0.01, os.clock() - PhaseStartTime)
+        data.SubmitTime = math.floor(elapsed * 100) / 100
+        print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs", player.Name, data.CurrentBid, data.SubmitTime))
     end
 end)
 

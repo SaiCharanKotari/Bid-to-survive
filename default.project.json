@@ -7,6 +7,9 @@
       "$ignoreUnknownInstances": true,
       "GameConfig": {
         "$path": "src/shared/GameConfig.luau"
+      },
+      "GorillaMotionData": {
+        "$path": "src/shared/GorillaMotionData.luau"
       }
     },
 
@@ -14,6 +17,18 @@
       "$ignoreUnknownInstances": true,
       "RoundManager": {
         "$path": "src/server/RoundManager.server.luau"
+      },
+      "SpawnAndAFKManager": {
+        "$path": "src/server/SpawnAndAFKManager.server.luau"
+      },
+      "RuinsDoorHandManager": {
+        "$path": "src/server/RuinsDoorHandManager.luau"
+      },
+      "GorillaSmashManager": {
+        "$path": "src/server/GorillaSmashManager.luau"
+      },
+      "GorillaMotionData": {
+        "$path": "src/server/GorillaMotionData.luau"
       }
     },
 
@@ -34,7 +49,16 @@
     "StarterPlayer": {
       "$ignoreUnknownInstances": true,
       "StarterPlayerScripts": {
-        "$ignoreUnknownInstances": true
+        "$ignoreUnknownInstances": true,
+        "MovementAndSprintClient": {
+          "$path": "src/client/MovementAndSprintClient.client.luau"
+        },
+        "RuinsImpactClient": {
+          "$path": "src/client/RuinsImpactClient.client.luau"
+        },
+        "GorillaImpactClient": {
+          "$path": "src/client/GorillaImpactClient.client.luau"
+        }
       }
     },
 

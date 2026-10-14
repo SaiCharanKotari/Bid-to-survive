@@ -2,8 +2,11 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
+local RuinsDoorHandManager = require(ServerScriptService:WaitForChild("RuinsDoorHandManager"))
+local GorillaSmashManager = require(ServerScriptService:WaitForChild("GorillaSmashManager"))
 local Network = ReplicatedStorage:WaitForChild("Network")
 
 local StateChanged = Network:WaitForChild("StateChanged")
@@ -161,8 +164,8 @@ local function TeleportToLobby(player)
     local char = player.Character
     if not char then return end
     local lobbySpawn = SpawnArea:FindFirstChild("LobbySpawn")
-    local basePos = lobbySpawn and lobbySpawn.Position or Vector3.new(39.5, 93, -27.7)
-    local offset = Vector3.new(math.random(-5, 5), 3, math.random(-5, 5))
+    local basePos = lobbySpawn and lobbySpawn.Position or Vector3.new(48.11, 85.14, 2.92)
+    local offset = Vector3.new(math.random(-3, 3), 3.5, math.random(-3, 3))
     TeleportCharacter(char, basePos + offset)
 end
 
@@ -290,38 +293,30 @@ end
 -- HAMMER SMASH EXECUTION
 --------------------------------------------------------------------------------
 
-local function TriggerHammerSmash(rarity)
-    local exec = GameplayArea:FindFirstChild("Executioner")
-    local repAnim = ReplicatedStorage:WaitForChild("Animations"):FindFirstChild("A powerful")
+local function TriggerHammerSmash(rarity, onImpactCallback, customPlayerData)
+    HammerSmash:FireAllClients({
+        Rarity = rarity,
+        ImpactDelay = 3.27
+    })
     
-    if exec then
-        local hammerModel = exec:FindFirstChild("ExecutionerHammer") or exec:FindFirstChild("Thors Hammer")
-        if hammerModel then
-            local handle = hammerModel:FindFirstChild("Handle")
-            if handle then
-                handle.Color = rarity.Color
-                handle.Material = rarity.Neon and Enum.Material.Neon or Enum.Material.Metal
-                local slashSound = handle:FindFirstChild("slash")
-                if slashSound then
-                    slashSound.PlaybackSpeed = rarity.SoundPitch
-                    slashSound:Play()
+    RuinsDoorHandManager.ExecuteSequenceAndDamage(
+        onImpactCallback,
+        customPlayerData,
+        function(isOpen)
+            local ruinsDoor = workspace:FindFirstChild("Ruins door") or workspace:FindFirstChild("RuinsDoor")
+            if ruinsDoor then
+                for _, desc in ipairs(ruinsDoor:GetDescendants()) do
+                    local nameLower = desc.Name:lower()
+                    if nameLower:find("partinvinciblewhenopening") or nameLower:find("partinvisiblewhenopening") then
+                        if desc:IsA("BasePart") then
+                            desc.Transparency = isOpen and 1 or 0
+                            desc.CanCollide = not isOpen
+                        end
+                    end
                 end
             end
         end
-        
-        local humanoid = exec:FindFirstChild("Humanoid")
-        local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
-        if animator and repAnim then
-            local track = animator:LoadAnimation(repAnim)
-            track.Priority = Enum.AnimationPriority.Action
-            track:Play(0.1)
-        end
-    end
-    
-    HammerSmash:FireAllClients({
-        Rarity = rarity,
-        ImpactDelay = 1.33
-    })
+    )
 end
 
 --------------------------------------------------------------------------------
@@ -579,42 +574,51 @@ local function RunMatch(session)
         ------------------------------------------------------------------------
         -- PHASE 6: HAMMER SMASH (Neon Shield Protects Winners)
         ------------------------------------------------------------------------
-        print("[ROUND] HammerSmash START duration=3")
+        print("[ROUND] HammerSmash START (Ruins Door Hand Hazard)")
         local p6Start = os.clock()
         
-        BroadcastState("Phase6_Smash", 3, { Rarity = CurrentRarity })
-        TriggerHammerSmash(CurrentRarity)
-        task.wait(1.33) -- Impact timing
+        BroadcastState("Phase6_Smash", 6, { Rarity = CurrentRarity })
         
         local dmg = math.floor((GameConfig.MaxHealth * CurrentRarity.DamagePercent) / 100)
         
-        -- Real non-AFK players
-        for _, player in ipairs(GetLivingRealPlayers()) do
-            local pData = PlayerData[player.UserId]
-            local isProtected = (player.Character and player.Character:FindFirstChild("SafeBidGlow") ~= nil)
-            if not isProtected then
-                pData.Health = math.max(0, pData.Health - dmg)
-                local char = player.Character
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    hum.Health = pData.Health
+        TriggerHammerSmash(CurrentRarity, function(escapedPlayers, hitPlayers)
+            -- Impact damage applied ONLY to players caught inside the 80% Red Circle and unprotected!
+            local hitSet = {}
+            if hitPlayers then
+                for _, p in ipairs(hitPlayers) do
+                    hitSet[p] = true
+                    if typeof(p) == "Instance" and p:IsA("Player") then
+                        hitSet[p.UserId] = true
+                    end
                 end
             end
-        end
-        
-        -- Bot players
-        for _, bData in ipairs(living) do
-            if bData.IsBot and bData.Character then
-                local isProtected = (bData.Character:FindFirstChild("SafeBidGlow") ~= nil)
-                if not isProtected then
-                    bData.Health = math.max(0, bData.Health - dmg)
-                    local hum = bData.Character:FindFirstChildOfClass("Humanoid")
-                    if hum then hum.Health = bData.Health end
+
+            for _, player in ipairs(GetLivingRealPlayers()) do
+                local pData = PlayerData[player.UserId]
+                local isProtected = (player.Character and player.Character:FindFirstChild("SafeBidGlow") ~= nil)
+                local wasCaught = (hitPlayers == nil) or (hitSet[player] or hitSet[player.UserId])
+                if not isProtected and wasCaught and pData then
+                    pData.Health = math.max(0, pData.Health - dmg)
+                    local char = player.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        hum.Health = pData.Health
+                    end
                 end
             end
-        end
+            
+            for _, bData in ipairs(living) do
+                if bData.IsBot and bData.Character then
+                    local isProtected = (bData.Character:FindFirstChild("SafeBidGlow") ~= nil)
+                    if not isProtected then
+                        bData.Health = math.max(0, bData.Health - dmg)
+                        local hum = bData.Character:FindFirstChildOfClass("Humanoid")
+                        if hum then hum.Health = bData.Health end
+                    end
+                end
+            end
+        end, PlayerData)
         
-        task.wait(1.5)
         ClearWinnerGlow()
         print(string.format("[ROUND] HammerSmash END elapsed=%.2f", os.clock() - p6Start))
         

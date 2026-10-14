@@ -20,6 +20,10 @@
     "StarterGui": {
       "$ignoreUnknownInstances": true,
       "BidToSurviveUI": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ResetOnSpawn": false
+        },
         "$ignoreUnknownInstances": true,
         "ClientUIController": {
           "$path": "src/client/ClientUIController.client.luau"

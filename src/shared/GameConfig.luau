@@ -28,7 +28,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 1.0,
         CameraShake = 0.5,
         AssetFile = "hammer_common.png",
-        AssetId = "rbxassetid://105495673507189",
+        AssetId = "rbxassetid://99687163311393",
     },
     Uncommon = {
         Name = "Uncommon",
@@ -40,7 +40,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 0.95,
         CameraShake = 0.8,
         AssetFile = "hammer_uncommon.png",
-        AssetId = "rbxassetid://75800528028974",
+        AssetId = "rbxassetid://94906827959757",
     },
     Rare = {
         Name = "Rare",
@@ -52,7 +52,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 0.9,
         CameraShake = 1.2,
         AssetFile = "hammer_rare.png",
-        AssetId = "rbxassetid://130593511073820",
+        AssetId = "rbxassetid://99122878797775",
     },
     Legendary = {
         Name = "Legendary",
@@ -64,7 +64,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 0.85,
         CameraShake = 1.6,
         AssetFile = "hammer_legendary.png",
-        AssetId = "rbxassetid://97051726601714",
+        AssetId = "rbxassetid://134660087390735",
     },
     Mythical = {
         Name = "Mythical",
@@ -76,7 +76,7 @@ GameConfig.HammerRarities = {
         SoundPitch = 0.75,
         CameraShake = 2.2,
         AssetFile = "hammer_mythical.png",
-        AssetId = "rbxassetid://130727432720621",
+        AssetId = "rbxassetid://105142270694831",
     }
 }
 

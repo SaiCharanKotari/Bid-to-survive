@@ -83,6 +83,7 @@ local CurrentHealth = GameConfig.MaxHealth or 100
 local IsAlive = true
 local IsAFK = false -- Default OFF as requested
 local CurrentParticipationState = "WaitingInLobby" -- "AFK", "WaitingInLobby", "Active", "Eliminated"
+local CurrentPhase = "Intermission"
 local SessionToken = 0
 local CurrentPhaseDeadline = 0
 local HasSubmitted = false
@@ -90,7 +91,7 @@ local IsRoulettePlaying = false
 local CurrentShakeConn = nil
 
 -- Known verified base hammer asset (Rare is 100% loaded and verified on Roblox CDN)
-local VERIFIED_BASE_HAMMER = "rbxassetid://130593511073820"
+local VERIFIED_BASE_HAMMER = "rbxassetid://99122878797775"
 local PendingAssets = {}
 
 -- Preload probe for all rarity assets
@@ -165,26 +166,26 @@ rouletteContainer.Name = "RouletteContainer"
 rouletteContainer.Size = UDim2.new(0, 340, 0, 340)
 rouletteContainer.Position = UDim2.new(0.5, -170, 0.42, -170)
 rouletteContainer.BackgroundTransparency = 1
+rouletteContainer.BorderSizePixel = 0
 rouletteContainer.Visible = false
 rouletteContainer.ZIndex = 30
 rouletteContainer.Parent = gui
 
-local glowHalo = rouletteContainer:FindFirstChild("GlowHalo") or Instance.new("ImageLabel")
-glowHalo.Name = "GlowHalo"
-glowHalo.Size = UDim2.new(0, 280, 0, 280)
-glowHalo.Position = UDim2.new(0.5, -140, 0, 5)
-glowHalo.BackgroundTransparency = 1
-glowHalo.Image = "rbxassetid://5028857084"
-glowHalo.ImageTransparency = 0.4
-glowHalo.ZIndex = 31
-glowHalo.Parent = rouletteContainer
+-- Remove any old square GlowHalo shadow to keep floating hammer visuals 100% clean
+local oldHalo = rouletteContainer:FindFirstChild("GlowHalo")
+if oldHalo then
+    oldHalo:Destroy()
+end
 
 local hammerIcon = rouletteContainer:FindFirstChild("HammerIcon") or Instance.new("ImageLabel")
 hammerIcon.Name = "HammerIcon"
+hammerIcon.AnchorPoint = Vector2.new(0.5, 0.5)
 hammerIcon.Size = UDim2.new(0, 220, 0, 220)
-hammerIcon.Position = UDim2.new(0.5, -110, 0, 30)
+hammerIcon.Position = UDim2.new(0.5, 0, 0, 135)
 hammerIcon.BackgroundTransparency = 1
+hammerIcon.BorderSizePixel = 0
 hammerIcon.ScaleType = Enum.ScaleType.Fit
+hammerIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
 hammerIcon.ZIndex = 33
 hammerIcon.Parent = rouletteContainer
 
@@ -249,6 +250,20 @@ local function IsActiveInRound()
     return (not IsAFK) and (CurrentParticipationState == "Active")
 end
 
+local function IsInPlayground()
+    return IsActiveInRound() and (CurrentPhase ~= "Intermission") and (CurrentPhase ~= "MatchOver")
+end
+
+local function UpdateHUDVisibility()
+    local inPlayground = IsInPlayground()
+    healthBarBg.Visible = inPlayground
+    if inPlayground then
+        roundLabel.Position = UDim2.new(0, 0, 0, 66)
+    else
+        roundLabel.Position = UDim2.new(0, 0, 0, 34)
+    end
+end
+
 local function ForceHideAllRoundUI()
     SessionToken = SessionToken + 1
     StopCameraShake()
@@ -263,6 +278,7 @@ local function ForceHideAllRoundUI()
     reopenRankBtn.Visible = false
     screenFlash.BackgroundTransparency = 1
     IsRoulettePlaying = false
+    UpdateHUDVisibility()
 end
 
 --------------------------------------------------------------------------------
@@ -332,13 +348,15 @@ healthText.TextYAlignment = Enum.TextYAlignment.Center
 healthText.ZIndex = 5
 healthText.Text = string.format("%d / 100", CurrentHealth)
 
--- Round Label
-roundLabel.Position = UDim2.new(0, 0, 0, 66)
+-- Round Label (positioned under cash box when in lobby, below HP bar in playground)
+roundLabel.Position = UDim2.new(0, 0, 0, 34)
 roundLabel.Size = UDim2.new(0, 220, 0, 18)
 roundLabel.TextXAlignment = Enum.TextXAlignment.Left
 roundLabel.TextColor3 = Color3.fromRGB(150, 165, 185)
 roundLabel.Font = Enum.Font.GothamMedium
 roundLabel.TextSize = 12
+
+UpdateHUDVisibility()
 
 if rarityBadge then
     rarityBadge.Visible = false
@@ -391,6 +409,7 @@ afkButton.MouseButton1Click:Connect(function()
         CurrentParticipationState = "WaitingInLobby"
         ForceHideAllRoundUI()
     end
+    UpdateHUDVisibility()
     SetAFK:FireServer(IsAFK)
 end)
 
@@ -427,8 +446,7 @@ local function SetHammerVisual(rarityData)
     end
     
     hammerIcon.Image = assetId
-    hammerIcon.ImageColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
-    glowHalo.ImageColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
+    hammerIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
     rarityTitle.Text = string.format("🔨 %s HAMMER", (rarityData.Name or "COMMON"):upper())
     rarityTitle.TextColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
     damageTitle.Text = string.format("DEALS %d%% HP DAMAGE", rarityData.DamagePercent or 30)
@@ -440,8 +458,10 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
     local myToken = SessionToken
     
     rouletteContainer.Visible = true
-    glowHalo.ImageTransparency = 0.4
     hammerIcon.ImageTransparency = 0
+    hammerIcon.Size = UDim2.new(0, 220, 0, 220)
+    hammerIcon.Position = UDim2.new(0.5, 0, 0, 135)
+    hammerIcon.Rotation = 0
     rarityTitle.TextTransparency = 0
     damageTitle.TextTransparency = 0
     
@@ -464,12 +484,12 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
         local r = rarities[currentIdx]
         SetHammerVisual(r)
         
-        local tiltAngle = (i % 2 == 0) and 4 or -4
+        local tiltAngle = (i % 2 == 0) and 7 or -7
         hammerIcon.Rotation = tiltAngle
         
         TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Size = UDim2.new(0, 235, 0, 235),
-            Position = UDim2.new(0.5, -117, 0, 22)
+            Position = UDim2.new(0.5, 0, 0, 132)
         }):Play()
         
         task.wait(delay * 0.5)
@@ -482,7 +502,7 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
         
         TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
             Size = UDim2.new(0, 220, 0, 220),
-            Position = UDim2.new(0.5, -110, 0, 30)
+            Position = UDim2.new(0.5, 0, 0, 135)
         }):Play()
         
         task.wait(delay * 0.5)
@@ -494,19 +514,13 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
         return
     end
     
-    -- Stop EXACTLY on the server-authoritative rarity
+    -- Stop EXACTLY on the server-authoritative rarity with celebratory burst
     SetHammerVisual(targetRarity)
     hammerIcon.Rotation = 0
     
-    TweenService:Create(hammerIcon, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 260, 0, 260),
-        Position = UDim2.new(0.5, -130, 0, 10)
-    }):Play()
-    
-    TweenService:Create(glowHalo, TweenInfo.new(0.35), {
-        ImageTransparency = 0.05,
-        Size = UDim2.new(0, 320, 0, 320),
-        Position = UDim2.new(0.5, -160, 0, -15)
+    TweenService:Create(hammerIcon, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 270, 0, 270),
+        Position = UDim2.new(0.5, 0, 0, 135)
     }):Play()
     
     task.wait(1.5)
@@ -517,11 +531,11 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
         return
     end
     
-    TweenService:Create(hammerIcon, TweenInfo.new(0.4), {
+    TweenService:Create(hammerIcon, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
         ImageTransparency = 1,
-        Size = UDim2.new(0, 190, 0, 190)
+        Size = UDim2.new(0, 180, 0, 180),
+        Position = UDim2.new(0.5, 0, 0, 135)
     }):Play()
-    TweenService:Create(glowHalo, TweenInfo.new(0.4), { ImageTransparency = 1 }):Play()
     TweenService:Create(rarityTitle, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
     TweenService:Create(damageTitle, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
     
@@ -576,6 +590,7 @@ StatsUpdated.OnClientEvent:Connect(function(stats)
         }):Play()
     end
     
+    UpdateHUDVisibility()
     if not IsActiveInRound() then
         ForceHideAllRoundUI()
     end
@@ -585,6 +600,7 @@ ParticipationChanged.OnClientEvent:Connect(function(newState)
     if newState then
         CurrentParticipationState = newState
     end
+    UpdateHUDVisibility()
     if not IsActiveInRound() then
         ForceHideAllRoundUI()
     end
@@ -595,11 +611,13 @@ end)
 --------------------------------------------------------------------------------
 StateChanged.OnClientEvent:Connect(function(data)
     local phase = data.Phase
+    CurrentPhase = phase or CurrentPhase
     local round = data.Round or 1
     local rarity = data.Rarity
     local living = data.LivingCount or 1
     
     CurrentPhaseDeadline = data.Deadline or (os.clock() + (data.Duration or 0))
+    UpdateHUDVisibility()
     
     if IsActiveInRound() then
         roundLabel.Text = string.format("ROUND %d • %d ALIVE", round, living)

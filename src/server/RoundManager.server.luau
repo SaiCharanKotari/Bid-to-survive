@@ -124,6 +124,10 @@ local function SyncStats(player)
     local data = PlayerData[player.UserId]
     if data then
         local pState = data.ParticipationState or (data.IsAFK and "AFK" or "WaitingInLobby")
+        player:SetAttribute("Money", data.Money)
+        player:SetAttribute("Wallet", data.Money)
+        player:SetAttribute("Health", data.Health)
+        player:SetAttribute("HP", data.Health)
         StatsUpdated:FireClient(player, {
             Money = data.Money,
             Health = data.Health,
@@ -328,15 +332,19 @@ local function InitMatch()
     MatchActive = true
     ExposedPlayerId = nil
     
+    -- Cleanly respawn any dead players, restore 100 HP, reset attributes, and fire ResetHUDStateEvent
+    RuinsDoorHandManager.ResetAllPlayersForNewGame()
+    
     for _, player in ipairs(Players:GetPlayers()) do
         local existing = PlayerData[player.UserId]
         local isAfk = (existing ~= nil) and existing.IsAFK or false
         local partState = isAfk and "AFK" or "WaitingInLobby"
+        local startingMoney = (existing and existing.Money) or GameConfig.StartingMoney
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
-            Money = (existing and existing.Money) or GameConfig.StartingMoney,
-            Health = (existing and existing.Health) or GameConfig.MaxHealth,
+            Money = startingMoney,
+            Health = GameConfig.MaxHealth, -- FIX: Always 100 on new match! (Previously 0 or MaxHealth kept 0 because 0 is truthy in Lua)
             IsAlive = true,
             IsAFK = isAfk,
             ParticipationState = partState,
@@ -345,6 +353,10 @@ local function InitMatch()
             IsBot = false,
             Character = player.Character
         }
+        player:SetAttribute("Money", startingMoney)
+        player:SetAttribute("Wallet", startingMoney)
+        player:SetAttribute("Health", GameConfig.MaxHealth)
+        player:SetAttribute("HP", GameConfig.MaxHealth)
     end
     
     SetupCompanionBots(4)

@@ -39,6 +39,14 @@ if not TelegraphRemote then
 	TelegraphRemote.Parent = Network or ReplicatedStorage
 end
 
+local ResetHUDRemote: RemoteEvent = (Network and Network:FindFirstChild("ResetHUDStateEvent"))
+	or ReplicatedStorage:FindFirstChild("ResetHUDStateEvent") :: any
+if not ResetHUDRemote then
+	ResetHUDRemote = Instance.new("RemoteEvent")
+	ResetHUDRemote.Name = "ResetHUDStateEvent"
+	ResetHUDRemote.Parent = Network or ReplicatedStorage
+end
+
 -- Helper: Converts Studio Position + Studio Orientation (YXZ degrees) to exact CFrame
 local function toStudioCFrame(pos: Vector3, rotDeg: Vector3): CFrame
 	return CFrame.new(pos) * CFrame.fromOrientation(
@@ -57,6 +65,9 @@ local POSES = {
 
 	BlackHoleTargetScale = 3.804,
 
+	-- Shoulder / Portal pivot inside the Ruins Door
+	PortalShoulderPivot = Vector3.new(-245.0, 102.018, -30.455),
+
 	-- 1) Emerge Out of Portal
 	Emerge = {
 		MainHand = toStudioCFrame(Vector3.new(-198.174, 91.394, -29.243), Vector3.new(18.125, -166.564, -31.134)),
@@ -64,10 +75,10 @@ local POSES = {
 		LowerArm = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682)),
 	},
 
-	-- 2) Raise of Hand (Apex Wind-up - Towers high at Y=191 studs with zero clipping)
+	-- 2) Raise of Hand (Apex Wind-up)
 	Raise = {
-		MainHand = toStudioCFrame(Vector3.new(-193.164, 191.594, -64.161), Vector3.new(18.125, -166.564, -166.133)),
-		SubHand  = toStudioCFrame(Vector3.new(-193.164, 191.594, -64.161), Vector3.new(18.125, -166.564, -166.133)),
+		MainHand = toStudioCFrame(Vector3.new(-207.17, 129.235, -39.829), Vector3.new(18.125, -166.564, -76.134)),
+		SubHand  = toStudioCFrame(Vector3.new(-207.17, 129.235, -39.829), Vector3.new(18.125, -166.564, -76.134)),
 		LowerArm = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682)),
 	},
 
@@ -78,6 +89,109 @@ local POSES = {
 		LowerArm = toStudioCFrame(Vector3.new(-220.23, 86.704, -23.81),   Vector3.new(18.125, -166.564, -62.174)),
 	}
 }
+
+-- ============================================================================
+-- KINEMATIC SHOULDER-ANCHORED SOLVER & ANATOMICAL WRIST HINGE
+-- ============================================================================
+local PORTAL_PIVOT = POSES.PortalShoulderPivot -- Vector3.new(-245.0, 102.018, -30.455)
+local BASE_HIT_ARM = POSES.HitGround.LowerArm
+local BASE_HIT_SUB = POSES.HitGround.SubHand
+local BASE_HIT_MAIN = POSES.HitGround.MainHand
+
+-- Visual anatomical wrist joint locations:
+-- LowerArm: size (17.52, 91.09, 24.47), wrist tip is at -Y (-45.54 studs)
+-- SubHand:  size (25.07, 55.82, 32.11), wrist base is at +Y (+27.91 studs)
+local ARM_WRIST_LOCAL  = Vector3.new(0, -45.54, 0)
+local HAND_WRIST_LOCAL = Vector3.new(-5.368, 27.981, 1.308)
+
+local HIT_REL_HAND_TO_ARM = BASE_HIT_ARM:Inverse() * BASE_HIT_SUB
+local HIT_REL_MAIN_TO_HAND = BASE_HIT_SUB:Inverse() * BASE_HIT_MAIN
+
+local BASE_RAISE_ARM = POSES.Raise.LowerArm
+local BASE_RAISE_SUB = POSES.Raise.SubHand
+local BASE_RAISE_MAIN = POSES.Raise.MainHand
+local RAISE_REL_HAND_TO_ARM = BASE_RAISE_ARM:Inverse() * BASE_RAISE_SUB
+local RAISE_REL_MAIN_TO_HAND = BASE_RAISE_SUB:Inverse() * BASE_RAISE_MAIN
+
+-- Authored strike direction and distance from portal pivot
+local AUTHORED_DIR_XZ = Vector3.new(BASE_HIT_SUB.Position.X - PORTAL_PIVOT.X, 0, BASE_HIT_SUB.Position.Z - PORTAL_PIVOT.Z)
+local AUTHORED_DIST = AUTHORED_DIR_XZ.Magnitude -- ~93.3 studs
+local AUTHORED_YAW = math.atan2(-AUTHORED_DIR_XZ.X, -AUTHORED_DIR_XZ.Z)
+
+-- Calculates the exact shoulder-anchored Raise and HitGround poses for ANY target point
+local function computeArticulatedPosesForTarget(circleCenter: Vector3)
+	local targetDirXZ = Vector3.new(circleCenter.X - PORTAL_PIVOT.X, 0, circleCenter.Z - PORTAL_PIVOT.Z)
+	local targetDist = targetDirXZ.Magnitude
+	local targetYaw = math.atan2(-targetDirXZ.X, -targetDirXZ.Z)
+
+	-- 1. Clamp lateral yaw swing to [-22 deg, +22 deg] so the 91-stud arm stays cleanly
+	-- inside the portal doorway and never slices sideways through the stone pillar columns.
+	local deltaYaw = math.atan2(math.sin(targetYaw - AUTHORED_YAW), math.cos(targetYaw - AUTHORED_YAW))
+	deltaYaw = math.clamp(deltaYaw, math.rad(-22), math.rad(22))
+
+	-- 2. Clamp target reach distance to natural anatomical reach [0.75, 1.15] (70 to 108 studs).
+	-- Applies a controlled telescoping offset along the strike ray so the proximal shoulder tip
+	-- ALWAYS remains rooted inside the black hole portal opening!
+	local reachFactor = math.clamp(targetDist / math.max(AUTHORED_DIST, 1), 0.75, 1.15)
+	local aimUnit = (targetDist > 0.001) and (targetDirXZ / targetDist) or Vector3.new(1, 0, 0)
+	local extensionOffset = aimUnit * ((reachFactor - 1.0) * AUTHORED_DIST * 0.5)
+
+	-- 3. Shoulder-Rooted Ground Impact Pose (Rigid wrist = 0.00 studs separation anywhere)
+	local hitPivotCF = CFrame.new(PORTAL_PIVOT) * CFrame.Angles(0, deltaYaw, 0) * CFrame.new(-PORTAL_PIVOT)
+	local solvedHitArm = (hitPivotCF * BASE_HIT_ARM) + extensionOffset
+	local solvedHitSub = solvedHitArm * HIT_REL_HAND_TO_ARM
+	local solvedHitMain = solvedHitSub * HIT_REL_MAIN_TO_HAND
+
+	local dynamicHitPose = {
+		LowerArm = solvedHitArm,
+		SubHand  = solvedHitSub,
+		MainHand = solvedHitMain,
+	}
+
+	-- 4. Shoulder-Rooted Raise / Apex Wind-up Pose (Rotates arm toward target from portal hinge)
+	local raisePivotCF = CFrame.new(PORTAL_PIVOT) * CFrame.Angles(0, deltaYaw * 0.60, 0) * CFrame.new(-PORTAL_PIVOT)
+	local solvedRaiseArm = raisePivotCF * BASE_RAISE_ARM
+	local solvedRaiseSub = solvedRaiseArm * RAISE_REL_HAND_TO_ARM
+	local solvedRaiseMain = solvedRaiseSub * RAISE_REL_MAIN_TO_HAND
+
+	local dynamicRaisePose = {
+		LowerArm = solvedRaiseArm,
+		SubHand  = solvedRaiseSub,
+		MainHand = solvedRaiseMain,
+	}
+
+	return dynamicRaisePose, dynamicHitPose
+end
+
+-- ============================================================================
+-- CALL THIS AT THE START OF EVERY NEW GAME TO FIX HP STUCK AT 0!
+-- ============================================================================
+function RuinsDoorHandManager.ResetAllPlayersForNewGame()
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+		-- If player died in Game 1, respawn them cleanly for Game 2
+		if not char or not hum or hum.Health <= 0 then
+			player:LoadCharacter()
+			char = player.Character or player.CharacterAdded:Wait()
+			hum = char:WaitForChild("Humanoid", 5)
+		end
+
+		if hum then
+			hum.MaxHealth = 100
+			hum.Health = hum.MaxHealth
+		end
+
+		-- Reset any custom HP/round attributes used by Bid-to-survive
+		player:SetAttribute("HP", 100)
+		player:SetAttribute("Health", 100)
+		player:SetAttribute("LostBet", nil)
+	end
+
+	-- Force all Client HUDs to re-bind and fill HP + Energy to 100%
+	ResetHUDRemote:FireAllClients()
+end
 
 local DANGER_CIRCLE_RATIO = 0.80
 
@@ -464,6 +578,69 @@ local function tweenHandPose(subHand: BasePart?, lowerArm: BasePart?, mainHandPa
 	return t2 or t3 or t1
 end
 
+-- Kinematic Arm & Hand Driver: Pins the wrist attachment point of SubHand to LowerArm
+-- on every single Heartbeat frame, eliminating linear tween chord separation mid-swing!
+local function tweenArticulatedArm(
+	subHand: BasePart?,
+	lowerArm: BasePart?,
+	mainHandPart: BasePart?,
+	targetPose: any,
+	tweenInfo: TweenInfo
+): Tween?
+	if not lowerArm or not subHand then
+		return tweenHandPose(subHand, lowerArm, mainHandPart, targetPose, tweenInfo)
+	end
+
+	local startArmCF = lowerArm.CFrame
+	local targetArmCF = targetPose.LowerArm
+	local startSubCF = subHand.CFrame
+	local targetSubCF = targetPose.SubHand
+
+	local startRelRot = startArmCF.Rotation:Inverse() * startSubCF.Rotation
+	local targetRelRot = targetArmCF.Rotation:Inverse() * targetSubCF.Rotation
+
+	local armTween = tweenObjectCFrame(lowerArm, targetArmCF, tweenInfo)
+	if not armTween then return nil end
+
+	local startTime = os.clock()
+	local duration = tweenInfo.Time
+	local style = tweenInfo.EasingStyle
+	local dir = tweenInfo.EasingDirection
+
+	local conn: RBXScriptConnection? = nil
+	conn = RunService.Heartbeat:Connect(function()
+		if not lowerArm or not lowerArm.Parent or not subHand or not subHand.Parent then
+			if conn then conn:Disconnect() end
+			return
+		end
+
+		local elapsed = os.clock() - startTime
+		local progress = math.clamp(elapsed / math.max(duration, 0.001), 0, 1)
+		local alpha = TweenService:GetValue(progress, style, dir)
+
+		local curArmCF = lowerArm.CFrame
+		local curRelRot = startRelRot:Lerp(targetRelRot, alpha)
+		local armWristWorld = curArmCF:PointToWorldSpace(ARM_WRIST_LOCAL)
+		local curSubCF = CFrame.new(armWristWorld) * (curArmCF.Rotation * curRelRot) * CFrame.new(-HAND_WRIST_LOCAL)
+
+		subHand.CFrame = curSubCF
+		if mainHandPart and targetPose.MainHand then
+			mainHandPart.CFrame = curSubCF * HIT_REL_MAIN_TO_HAND
+		end
+	end)
+
+	armTween.Completed:Once(function()
+		if conn then
+			conn:Disconnect()
+			conn = nil
+		end
+		if subHand then subHand.CFrame = targetPose.SubHand end
+		if mainHandPart and targetPose.MainHand then mainHandPart.CFrame = targetPose.MainHand end
+	end)
+
+	return armTween
+end
+
 -- ============================================================================
 -- AUTHORITATIVE SEQUENCE EXECUTION
 -- ============================================================================
@@ -561,11 +738,13 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 			TelegraphRemote:FireAllClients(circleCenter, circleRadius, lockedWarningTime, lockedTarget)
 		end
 
-		local raiseTween = tweenHandPose(
+		local dynamicRaisePose, dynamicHitPose = computeArticulatedPosesForTarget(circleCenter)
+
+		local raiseTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
 			mainHandPart,
-			POSES.Raise,
+			dynamicRaisePose,
 			TweenInfo.new(raiseDuration, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 		)
 		if raiseTween then raiseTween.Completed:Wait() else task.wait(raiseDuration) end
@@ -576,17 +755,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		-- ------------------------------------------------------------------------
 		-- STAGE 4: GROUND SLAM & SYNCHRONIZED PLAYER DAMAGE (0.22s)
 		-- ------------------------------------------------------------------------
-		-- Shift SubHand slam X/Z to visibly strike circleCenter!
-		local baseSubPos = POSES.HitGround.SubHand.Position
-		local deltaXZ = Vector3.new(circleCenter.X - baseSubPos.X, 0, circleCenter.Z - baseSubPos.Z)
-
-		local dynamicHitPose = {
-			MainHand = POSES.HitGround.MainHand + (deltaXZ * 0.55),
-			SubHand  = POSES.HitGround.SubHand + deltaXZ,
-			LowerArm = POSES.HitGround.LowerArm + (deltaXZ * 0.35),
-		}
-
-		local slamTween = tweenHandPose(
+		local slamTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
 			mainHandPart,
@@ -676,7 +845,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		-- ------------------------------------------------------------------------
 		task.wait(0.75)
 
-		local retractTween = tweenHandPose(
+		local retractTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
 			mainHandPart,

@@ -39,6 +39,9 @@ if not ParticipationChanged then
     ParticipationChanged.Parent = Network
 end
 
+local ResetHUDRemote: RemoteEvent? = (Network and Network:FindFirstChild("ResetHUDStateEvent") :: RemoteEvent?)
+	or (ReplicatedStorage:FindFirstChild("ResetHUDStateEvent") :: RemoteEvent?)
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local gui = script:FindFirstAncestorWhichIsA("ScreenGui") or playerGui:WaitForChild("BidToSurviveUI")
@@ -256,12 +259,9 @@ end
 
 local function UpdateHUDVisibility()
     local inPlayground = IsInPlayground()
-    healthBarBg.Visible = inPlayground
-    if inPlayground then
-        roundLabel.Position = UDim2.new(0, 0, 0, 66)
-    else
-        roundLabel.Position = UDim2.new(0, 0, 0, 34)
-    end
+    healthBarBg.Visible = false
+    cashLabel.Visible = false
+    roundLabel.Position = UDim2.new(0, 0, 0, 0)
 end
 
 local function ForceHideAllRoundUI()
@@ -282,7 +282,7 @@ local function ForceHideAllRoundUI()
 end
 
 --------------------------------------------------------------------------------
--- 4. HUD STYLING (HEALTH BAR, MONEY BOX & AFK TOGGLE BUTTON)
+-- 4. HUD STYLING (ROUND LABEL & AFK TOGGLE BUTTON)
 --------------------------------------------------------------------------------
 statsCard.BackgroundTransparency = 1
 local oldCardStroke = statsCard:FindFirstChildOfClass("UIStroke")
@@ -290,71 +290,20 @@ if oldCardStroke then oldCardStroke:Destroy() end
 local oldCardCorner = statsCard:FindFirstChildOfClass("UICorner")
 if oldCardCorner then oldCardCorner:Destroy() end
 
-statsCard.Size = UDim2.new(0, 240, 0, 95)
-statsCard.Position = UDim2.new(0, 20, 1, -115)
+statsCard.Size = UDim2.new(0, 260, 0, 24)
+statsCard.Position = UDim2.new(0, 24, 1, -154)
 
--- Compact black money box (NO coin icon, text-only balance)
-cashLabel.Size = UDim2.new(0, 140, 0, 28)
-cashLabel.Position = UDim2.new(0, 0, 0, 0)
-cashLabel.BackgroundColor3 = Color3.fromRGB(12, 13, 17)
-cashLabel.BackgroundTransparency = 0
-cashLabel.Font = Enum.Font.GothamBold
-cashLabel.TextSize = 15
-cashLabel.TextColor3 = Color3.fromRGB(240, 245, 255)
-cashLabel.TextXAlignment = Enum.TextXAlignment.Center
-cashLabel.Text = string.format("$%.2f", CurrentMoney)
+-- Hide duplicate cash box & health bar (rendered by unified MovementDiveAndHUDClient)
+cashLabel.Visible = false
+healthBarBg.Visible = false
 
-local cashCorner = cashLabel:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-cashCorner.CornerRadius = UDim.new(0, 4)
-cashCorner.Parent = cashLabel
-
-local cashStroke = cashLabel:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-cashStroke.Color = Color3.fromRGB(36, 40, 52)
-cashStroke.Thickness = 1
-cashStroke.Parent = cashLabel
-
--- Noticeably taller rectangular red health bar (26px)
-healthBarBg.Size = UDim2.new(0, 220, 0, 26)
-healthBarBg.Position = UDim2.new(0, 0, 0, 34)
-healthBarBg.BackgroundColor3 = Color3.fromRGB(48, 14, 18)
-healthBarBg.BackgroundTransparency = 0
-
-local hpBgCorner = healthBarBg:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-hpBgCorner.CornerRadius = UDim.new(0, 4)
-hpBgCorner.Parent = healthBarBg
-
-local hpBgStroke = healthBarBg:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-hpBgStroke.Color = Color3.fromRGB(72, 22, 28)
-hpBgStroke.Thickness = 1
-hpBgStroke.Parent = healthBarBg
-
--- Animated Fill
-healthBarFill.BackgroundColor3 = Color3.fromRGB(225, 40, 50)
-local fillCorner = healthBarFill:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-fillCorner.CornerRadius = UDim.new(0, 3)
-fillCorner.Parent = healthBarFill
-
--- Centered bold white text 100 / 100
-healthText.Size = UDim2.new(1, 0, 1, 0)
-healthText.Position = UDim2.new(0, 0, 0, 0)
-healthText.BackgroundTransparency = 1
-healthText.Font = Enum.Font.GothamBold
-healthText.TextSize = 13
-healthText.TextColor3 = Color3.fromRGB(255, 255, 255)
-healthText.TextStrokeTransparency = 0.3
-healthText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-healthText.TextXAlignment = Enum.TextXAlignment.Center
-healthText.TextYAlignment = Enum.TextYAlignment.Center
-healthText.ZIndex = 5
-healthText.Text = string.format("%d / 100", CurrentHealth)
-
--- Round Label (positioned under cash box when in lobby, below HP bar in playground)
-roundLabel.Position = UDim2.new(0, 0, 0, 34)
-roundLabel.Size = UDim2.new(0, 220, 0, 18)
+-- Round Label positioned cleanly above the status stack
+roundLabel.Position = UDim2.new(0, 0, 0, 0)
+roundLabel.Size = UDim2.new(1, 0, 1, 0)
 roundLabel.TextXAlignment = Enum.TextXAlignment.Left
 roundLabel.TextColor3 = Color3.fromRGB(150, 165, 185)
 roundLabel.Font = Enum.Font.GothamMedium
-roundLabel.TextSize = 12
+roundLabel.TextSize = 13
 
 UpdateHUDVisibility()
 
@@ -367,8 +316,8 @@ end
 --------------------------------------------------------------------------------
 local afkButton = gui:FindFirstChild("AFKButton") or Instance.new("TextButton")
 afkButton.Name = "AFKButton"
-afkButton.Size = UDim2.new(0, 88, 0, 26)
-afkButton.Position = UDim2.new(0, 20, 1, -150)
+afkButton.Size = UDim2.new(0, 96, 0, 26)
+afkButton.Position = UDim2.new(0, 24, 1, -188)
 afkButton.Font = Enum.Font.GothamBold
 afkButton.TextSize = 12
 afkButton.ZIndex = 20
@@ -604,6 +553,36 @@ ParticipationChanged.OnClientEvent:Connect(function(newState)
     if not IsActiveInRound() then
         ForceHideAllRoundUI()
     end
+end)
+
+local function handleClientHUDReset()
+    CurrentHealth = 100
+    IsAlive = true
+    healthText.Text = "100 / 100"
+    healthBarFill.Size = UDim2.new(1, 0, 1, 0)
+    UpdateHUDVisibility()
+end
+
+if ResetHUDRemote then
+    ResetHUDRemote.OnClientEvent:Connect(handleClientHUDReset)
+else
+    task.spawn(function()
+        local remote = ReplicatedStorage:WaitForChild("ResetHUDStateEvent", 15) :: RemoteEvent?
+        if remote then
+            remote.OnClientEvent:Connect(handleClientHUDReset)
+        end
+    end)
+end
+
+player.CharacterAdded:Connect(function(newChar)
+    local hum = newChar:WaitForChild("Humanoid", 5) :: Humanoid?
+    if hum then
+        CurrentHealth = hum.Health
+        local maxH = (hum.MaxHealth > 0) and hum.MaxHealth or 100
+        healthText.Text = string.format("%d / %d", math.ceil(hum.Health), math.ceil(maxH))
+        healthBarFill.Size = UDim2.new(math.clamp(hum.Health / maxH, 0, 1), 0, 1, 0)
+    end
+    UpdateHUDVisibility()
 end)
 
 --------------------------------------------------------------------------------

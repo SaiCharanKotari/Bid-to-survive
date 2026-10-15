@@ -50,8 +50,8 @@
       "$ignoreUnknownInstances": true,
       "StarterPlayerScripts": {
         "$ignoreUnknownInstances": true,
-        "MovementAndSprintClient": {
-          "$path": "src/client/MovementAndSprintClient.client.luau"
+        "MovementDiveAndHUDClient": {
+          "$path": "src/client/MovementDiveAndHUDClient.client.luau"
         },
         "RuinsImpactClient": {
           "$path": "src/client/RuinsImpactClient.client.luau"

@@ -90,19 +90,21 @@ function GameConfig.GetRarityList()
     return list
 end
 
-function GameConfig.RollRarity()
-    local roll = math.random()
-    local cumulative = 0
-    for _, name in ipairs(GameConfig.RarityOrder) do
-        local data = GameConfig.HammerRarities[name]
-        if data then
-            cumulative = cumulative + data.Chance
-            if roll <= cumulative then
-                return data
-            end
-        end
-    end
-    return GameConfig.HammerRarities.Common
+local HammerRarityRoller
+pcall(function()
+    HammerRarityRoller = require(game:GetService("ReplicatedStorage"):WaitForChild("HammerRarityRoller", 3))
+end)
+if not HammerRarityRoller then
+    HammerRarityRoller = require(script.Parent:WaitForChild("HammerRarityRoller"))
+end
+
+GameConfig.HammerRarityRoller = HammerRarityRoller
+GameConfig.RollWinningHammer = HammerRarityRoller.RollWinningHammer
+GameConfig.BuildRandomSpinnerStrip = HammerRarityRoller.BuildRandomSpinnerStrip
+
+function GameConfig.RollRarity(roundNumber: number?)
+    local winning = HammerRarityRoller.RollWinningHammer(roundNumber or 1)
+    return GameConfig.HammerRarities[winning.Rarity] or GameConfig.HammerRarities.Common
 end
 
 return GameConfig

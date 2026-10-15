@@ -112,19 +112,21 @@ function GameConfig.GetRarityList()
     return list
 end
 
-function GameConfig.RollRarity()
-    local roll = math.random()
-    local cumulative = 0
-    for _, name in ipairs(GameConfig.RarityOrder) do
-        local data = GameConfig.HammerRarities[name]
-        if data then
-            cumulative = cumulative + data.Chance
-            if roll <= cumulative then
-                return data
-            end
-        end
-    end
-    return GameConfig.HammerRarities.Common
+local HammerRarityRoller
+pcall(function()
+    HammerRarityRoller = require(game:GetService("ReplicatedStorage"):WaitForChild("HammerRarityRoller", 3))
+end)
+if not HammerRarityRoller then
+    HammerRarityRoller = require(script.Parent:WaitForChild("HammerRarityRoller"))
+end
+
+GameConfig.HammerRarityRoller = HammerRarityRoller
+GameConfig.RollWinningHammer = HammerRarityRoller.RollWinningHammer
+GameConfig.BuildRandomSpinnerStrip = HammerRarityRoller.BuildRandomSpinnerStrip
+
+function GameConfig.RollRarity(roundNumber: number?)
+    local winning = HammerRarityRoller.RollWinningHammer(roundNumber or 1)
+    return GameConfig.HammerRarities[winning.Rarity] or GameConfig.HammerRarities.Common
 end
 
 return GameConfig
@@ -232,416 +234,282 @@ return {
 ]]></string>
       </Properties>
     </Item>
-  </Item>
-  <Item class="ServerScriptService" referent="4">
-    <Properties>
-      <string name="Name">ServerScriptService</string>
-    </Properties>
-    <Item class="ModuleScript" referent="5">
+    <Item class="ModuleScript" referent="4">
       <Properties>
-        <string name="Name">GorillaMotionData</string>
+        <string name="Name">HammerRarityRoller</string>
         <string name="Source"><![CDATA[--!strict
--- Authoritative clean 90-frame motion data for Gorilla-gem Two-Handed Thor's Hammer Smash
--- 30 FPS, 3.0 seconds total. Frame 40 (t=1.33s) is the exact ground slam impact.
-return {
-  {0.0000,0.0,0.0000,0.0000,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.0333,0.0,-0.0069,0.0000,0.0000,0.0,0.0,0.0030,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.0667,0.0,-0.0252,0.0000,0.0000,0.0,0.0,0.0110,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.1000,0.0,-0.0519,0.0000,0.0000,0.0,0.0,0.0226,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.1333,0.0,-0.0834,0.0000,0.0000,0.0,0.0,0.0364,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.1667,0.0,-0.1166,0.0000,0.0000,0.0,0.0,0.0509,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.2000,0.0,-0.1481,0.0000,0.0000,0.0,0.0,0.0646,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.2333,0.0,-0.1748,0.0000,0.0000,0.0,0.0,0.0763,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.2667,0.0,-0.1931,0.0000,0.0000,0.0,0.0,0.0843,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.3000,0.0,-0.2000,0.0000,0.0000,0.0,0.0,0.0873,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
-  {0.3333,0.0,-0.1971,-0.0029,-0.0015,0.0,0.0,0.0844,0.0,0.0,0.0019,0.0,0.0,0.0139,-0.0025,0.0038,0.0032,0.0,0.0,0.0,0.0,0.0,0.0139,0.0025,-0.0038,0.0032,0.0,0.0,0.0,0.0,0.0,-0.0010,0.0,0.0,0.0013,0.0,0.0,0.0,0.0,0.0,-0.0010,0.0,0.0,0.0013,0.0,0.0,0.0,0.0,0.0},
-  {0.3667,0.0,-0.1888,-0.0112,-0.0059,0.0,0.0,0.0760,0.0,0.0,0.0073,0.0,0.0,0.0538,-0.0098,0.0147,0.0122,0.0,0.0,0.0,0.0,0.0,0.0538,0.0098,-0.0147,0.0122,0.0,0.0,0.0,0.0,0.0,-0.0039,0.0,0.0,0.0049,0.0,0.0,0.0,0.0,0.0,-0.0039,0.0,0.0,0.0049,0.0,0.0,0.0,0.0,0.0},
-  {0.4000,0.0,-0.1757,-0.0243,-0.0127,0.0,0.0,0.0629,0.0,0.0,0.0159,0.0,0.0,0.1166,-0.0212,0.0318,0.0265,0.0,0.0,0.0,0.0,0.0,0.1166,0.0212,-0.0318,0.0265,0.0,0.0,0.0,0.0,0.0,-0.0085,0.0,0.0,0.0106,0.0,0.0,0.0,0.0,0.0,-0.0085,0.0,0.0,0.0106,0.0,0.0,0.0,0.0,0.0},
-  {0.4333,0.0,-0.1584,-0.0416,-0.0218,0.0,0.0,0.0455,0.0,0.0,0.0272,0.0,0.0,0.1997,-0.0363,0.0545,0.0454,0.0,0.0,0.0,0.0,0.0,0.1997,0.0363,-0.0545,0.0454,0.0,0.0,0.0,0.0,0.0,-0.0145,0.0,0.0,0.0182,0.0,0.0,0.0,0.0,0.0,-0.0145,0.0,0.0,0.0182,0.0,0.0,0.0,0.0,0.0},
-  {0.4667,0.0,-0.1375,-0.0625,-0.0327,0.0,0.0,0.0245,0.0,0.0,0.0409,0.0,0.0,0.3000,-0.0545,0.0818,0.0682,0.0,0.0,0.0,0.0,0.0,0.3000,0.0545,-0.0818,0.0682,0.0,0.0,0.0,0.0,0.0,-0.0218,0.0,0.0,0.0273,0.0,0.0,0.0,0.0,0.0,-0.0218,0.0,0.0,0.0273,0.0,0.0,0.0,0.0,0.0},
-  {0.5000,0.0,-0.1136,-0.0864,-0.0452,0.0,0.0,0.0006,0.0,0.0,0.0565,0.0,0.0,0.4147,-0.0754,0.1131,0.0942,0.0,0.0,0.0,0.0,0.0,0.4147,0.0754,-0.1131,0.0942,0.0,0.0,0.0,0.0,0.0,-0.0302,0.0,0.0,0.0377,0.0,0.0,0.0,0.0,0.0,-0.0302,0.0,0.0,0.0377,0.0,0.0,0.0,0.0,0.0},
-  {0.5333,0.0,-0.0873,-0.1127,-0.0590,0.0,0.0,-0.0258,0.0,0.0,0.0738,0.0,0.0,0.5409,-0.0983,0.1475,0.1229,0.0,0.0,0.0,0.0,0.0,0.5409,0.0983,-0.1475,0.1229,0.0,0.0,0.0,0.0,0.0,-0.0393,0.0,0.0,0.0492,0.0,0.0,0.0,0.0,0.0,-0.0393,0.0,0.0,0.0492,0.0,0.0,0.0,0.0,0.0},
-  {0.5667,0.0,-0.0592,-0.1408,-0.0737,0.0,0.0,-0.0540,0.0,0.0,0.0922,0.0,0.0,0.6758,-0.1229,0.1843,0.1536,0.0,0.0,0.0,0.0,0.0,0.6758,0.1229,-0.1843,0.1536,0.0,0.0,0.0,0.0,0.0,-0.0491,0.0,0.0,0.0614,0.0,0.0,0.0,0.0,0.0,-0.0491,0.0,0.0,0.0614,0.0,0.0,0.0,0.0,0.0},
-  {0.6000,0.0,-0.0299,-0.1701,-0.0891,0.0,0.0,-0.0834,0.0,0.0,0.1113,0.0,0.0,0.8164,-0.1484,0.2227,0.1856,0.0,0.0,0.0,0.0,0.0,0.8164,0.1484,-0.2227,0.1856,0.0,0.0,0.0,0.0,0.0,-0.0594,0.0,0.0,0.0742,0.0,0.0,0.0,0.0,0.0,-0.0594,0.0,0.0,0.0742,0.0,0.0,0.0,0.0,0.0},
-  {0.6333,0.0,0.0000,-0.2000,-0.1047,0.0,0.0,-0.1134,0.0,0.0,0.1309,0.0,0.0,0.9599,-0.1745,0.2618,0.2182,0.0,0.0,0.0,0.0,0.0,0.9599,0.1745,-0.2618,0.2182,0.0,0.0,0.0,0.0,0.0,-0.0698,0.0,0.0,0.0873,0.0,0.0,0.0,0.0,0.0,-0.0698,0.0,0.0,0.0873,0.0,0.0,0.0,0.0,0.0},
-  {0.6667,0.0,0.0299,-0.2299,-0.1204,0.0,0.0,-0.1435,0.0,0.0,0.1505,0.0,0.0,1.1034,-0.2006,0.3009,0.2508,0.0,0.0,0.0,0.0,0.0,1.1034,0.2006,-0.3009,0.2508,0.0,0.0,0.0,0.0,0.0,-0.0803,0.0,0.0,0.1003,0.0,0.0,0.0,0.0,0.0,-0.0803,0.0,0.0,0.1003,0.0,0.0,0.0,0.0,0.0},
-  {0.7000,0.0,0.0592,-0.2592,-0.1357,0.0,0.0,-0.1729,0.0,0.0,0.1696,0.0,0.0,1.2441,-0.2262,0.3393,0.2827,0.0,0.0,0.0,0.0,0.0,1.2441,0.2262,-0.3393,0.2827,0.0,0.0,0.0,0.0,0.0,-0.0905,0.0,0.0,0.1131,0.0,0.0,0.0,0.0,0.0,-0.0905,0.0,0.0,0.1131,0.0,0.0,0.0,0.0,0.0},
-  {0.7333,0.0,0.0873,-0.2873,-0.1504,0.0,0.0,-0.2011,0.0,0.0,0.1880,0.0,0.0,1.3789,-0.2507,0.3761,0.3134,0.0,0.0,0.0,0.0,0.0,1.3789,0.2507,-0.3761,0.3134,0.0,0.0,0.0,0.0,0.0,-0.1003,0.0,0.0,0.1254,0.0,0.0,0.0,0.0,0.0,-0.1003,0.0,0.0,0.1254,0.0,0.0,0.0,0.0,0.0},
-  {0.7667,0.0,0.1136,-0.3136,-0.1642,0.0,0.0,-0.2275,0.0,0.0,0.2053,0.0,0.0,1.5052,-0.2737,0.4105,0.3421,0.0,0.0,0.0,0.0,0.0,1.5052,0.2737,-0.4105,0.3421,0.0,0.0,0.0,0.0,0.0,-0.1095,0.0,0.0,0.1368,0.0,0.0,0.0,0.0,0.0,-0.1095,0.0,0.0,0.1368,0.0,0.0,0.0,0.0,0.0},
-  {0.8000,0.0,0.1375,-0.3375,-0.1767,0.0,0.0,-0.2514,0.0,0.0,0.2209,0.0,0.0,1.6199,-0.2945,0.4418,0.3682,0.0,0.0,0.0,0.0,0.0,1.6199,0.2945,-0.4418,0.3682,0.0,0.0,0.0,0.0,0.0,-0.1178,0.0,0.0,0.1473,0.0,0.0,0.0,0.0,0.0,-0.1178,0.0,0.0,0.1473,0.0,0.0,0.0,0.0,0.0},
-  {0.8333,0.0,0.1584,-0.3584,-0.1877,0.0,0.0,-0.2724,0.0,0.0,0.2346,0.0,0.0,1.7202,-0.3128,0.4691,0.3910,0.0,0.0,0.0,0.0,0.0,1.7202,0.3128,-0.4691,0.3910,0.0,0.0,0.0,0.0,0.0,-0.1251,0.0,0.0,0.1564,0.0,0.0,0.0,0.0,0.0,-0.1251,0.0,0.0,0.1564,0.0,0.0,0.0,0.0,0.0},
-  {0.8667,0.0,0.1757,-0.3757,-0.1967,0.0,0.0,-0.2898,0.0,0.0,0.2459,0.0,0.0,1.8032,-0.3279,0.4918,0.4098,0.0,0.0,0.0,0.0,0.0,1.8032,0.3279,-0.4918,0.4098,0.0,0.0,0.0,0.0,0.0,-0.1311,0.0,0.0,0.1639,0.0,0.0,0.0,0.0,0.0,-0.1311,0.0,0.0,0.1639,0.0,0.0,0.0,0.0,0.0},
-  {0.9000,0.0,0.1888,-0.3888,-0.2036,0.0,0.0,-0.3029,0.0,0.0,0.2545,0.0,0.0,1.8661,-0.3393,0.5089,0.4241,0.0,0.0,0.0,0.0,0.0,1.8661,0.3393,-0.5089,0.4241,0.0,0.0,0.0,0.0,0.0,-0.1357,0.0,0.0,0.1696,0.0,0.0,0.0,0.0,0.0,-0.1357,0.0,0.0,0.1696,0.0,0.0,0.0,0.0,0.0},
-  {0.9333,0.0,0.1971,-0.3971,-0.2079,0.0,0.0,-0.3112,0.0,0.0,0.2599,0.0,0.0,1.9059,-0.3465,0.5198,0.4332,0.0,0.0,0.0,0.0,0.0,1.9059,0.3465,-0.5198,0.4332,0.0,0.0,0.0,0.0,0.0,-0.1386,0.0,0.0,0.1733,0.0,0.0,0.0,0.0,0.0,-0.1386,0.0,0.0,0.1733,0.0,0.0,0.0,0.0,0.0},
-  {0.9667,0.0,0.2000,-0.4000,-0.2094,0.0,0.0,-0.3142,0.0,0.0,0.2618,0.0,0.0,1.9199,-0.3491,0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,1.9199,0.3491,-0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0},
-  {1.0000,0.0,0.2000,-0.4000,-0.2094,0.0,0.0,-0.3142,0.0,0.0,0.2618,0.0,0.0,1.9199,-0.3491,0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,1.9199,0.3491,-0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0},
-  {1.0333,0.0,0.2000,-0.4000,-0.2094,0.0,0.0,-0.3142,0.0,0.0,0.2618,0.0,0.0,1.9199,-0.3491,0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,1.9199,0.3491,-0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0},
-  {1.0667,0.0,0.2000,-0.4000,-0.2094,0.0,0.0,-0.3142,0.0,0.0,0.2618,0.0,0.0,1.9199,-0.3491,0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,1.9199,0.3491,-0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0},
-  {1.1000,0.0,0.2000,-0.4000,-0.2094,0.0,0.0,-0.3142,0.0,0.0,0.2618,0.0,0.0,1.9199,-0.3491,0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,1.9199,0.3491,-0.5236,0.4363,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0,-0.1396,0.0,0.0,0.1745,0.0,0.0,0.0,0.0,0.0},
-  {1.1333,0.0,0.1722,-0.3750,-0.1988,0.0,0.0,-0.2885,0.0,0.0,0.2473,0.0,0.0,1.8568,-0.3515,0.4994,0.4388,0.0,0.0,0.0,0.0,0.0,1.8568,0.3515,-0.4994,0.4388,0.0,0.0,0.0,0.0,0.0,-0.1430,0.0,0.0,0.1794,0.0,0.0,0.0,0.0,0.0,-0.1430,0.0,0.0,0.1794,0.0,0.0,0.0,0.0,0.0},
-  {1.1667,0.0,0.0889,-0.3000,-0.1668,0.0,0.0,-0.2114,0.0,0.0,0.2036,0.0,0.0,1.6678,-0.3588,0.4266,0.4460,0.0,0.0,0.0,0.0,0.0,1.6678,0.3588,-0.4266,0.4460,0.0,0.0,0.0,0.0,0.0,-0.1532,0.0,0.0,0.1939,0.0,0.0,0.0,0.0,0.0,-0.1532,0.0,0.0,0.1939,0.0,0.0,0.0,0.0,0.0},
-  {1.2000,0.0,-0.0500,-0.1750,-0.1134,0.0,0.0,-0.0829,0.0,0.0,0.1309,0.0,0.0,1.3526,-0.3709,0.3054,0.4581,0.0,0.0,0.0,0.0,0.0,1.3526,0.3709,-0.3054,0.4581,0.0,0.0,0.0,0.0,0.0,-0.1702,0.0,0.0,0.2182,0.0,0.0,0.0,0.0,0.0,-0.1702,0.0,0.0,0.2182,0.0,0.0,0.0,0.0,0.0},
-  {1.2333,0.0,-0.2444,-0.0000,-0.0388,0.0,0.0,0.0970,0.0,0.0,0.0291,0.0,0.0,0.9114,-0.3879,0.1357,0.4751,0.0,0.0,0.0,0.0,0.0,0.9114,0.3879,-0.1357,0.4751,0.0,0.0,0.0,0.0,0.0,-0.1939,0.0,0.0,0.2521,0.0,0.0,0.0,0.0,0.0,-0.1939,0.0,0.0,0.2521,0.0,0.0,0.0,0.0,0.0},
-  {1.2667,0.0,-0.4944,0.2250,0.0572,0.0,0.0,0.3282,0.0,0.0,-0.1018,0.0,0.0,0.3442,-0.4097,-0.0824,0.4969,0.0,0.0,0.0,0.0,0.0,0.3442,0.4097,0.0824,0.4969,0.0,0.0,0.0,0.0,0.0,-0.2245,0.0,0.0,0.2957,0.0,0.0,0.0,0.0,0.0,-0.2245,0.0,0.0,0.2957,0.0,0.0,0.0,0.0,0.0},
-  {1.3000,0.0,-0.8000,0.5000,0.1745,0.0,0.0,0.6109,0.0,0.0,-0.2618,0.0,0.0,-0.3491,-0.4363,-0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.3491,0.4363,0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0},
-  {1.3333,0.0,-0.8000,0.5000,0.1745,0.0,0.0,0.6109,0.0,0.0,-0.2618,0.0,0.0,-0.3491,-0.4363,-0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.3491,0.4363,0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0},
-  {1.3667,0.0,-0.8000,0.5000,0.1745,0.0,0.0,0.6109,0.0,0.0,-0.2618,0.0,0.0,-0.3491,-0.4363,-0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.3491,0.4363,0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0},
-  {1.4000,0.0,-0.8000,0.5000,0.1745,0.0,0.0,0.6109,0.0,0.0,-0.2618,0.0,0.0,-0.3491,-0.4363,-0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.3491,0.4363,0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0},
-  {1.4333,0.0,-0.8000,0.5000,0.1745,0.0,0.0,0.6109,0.0,0.0,-0.2618,0.0,0.0,-0.3491,-0.4363,-0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.3491,0.4363,0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0},
-  {1.4667,0.0,-0.8000,0.5000,0.1745,0.0,0.0,0.6109,0.0,0.0,-0.2618,0.0,0.0,-0.3491,-0.4363,-0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.3491,0.4363,0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0},
-  {1.5000,0.0,-0.8000,0.5000,0.1745,0.0,0.0,0.6109,0.0,0.0,-0.2618,0.0,0.0,-0.3491,-0.4363,-0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.3491,0.4363,0.3491,0.5236,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0,-0.2618,0.0,0.0,0.3491,0.0,0.0,0.0,0.0,0.0},
-  {1.5333,0.0,-0.7952,0.4968,0.1737,0.0,0.0,0.6076,0.0,0.0,-0.2600,0.0,0.0,-0.3470,-0.4335,-0.3470,0.5208,0.0,0.0,0.0,0.0,0.0,-0.3470,0.4335,0.3470,0.5208,0.0,0.0,0.0,0.0,0.0,-0.2603,0.0,0.0,0.3470,0.0,0.0,0.0,0.0,0.0,-0.2603,0.0,0.0,0.3470,0.0,0.0,0.0,0.0,0.0},
-  {1.5667,0.0,-0.7815,0.4876,0.1713,0.0,0.0,0.5985,0.0,0.0,-0.2548,0.0,0.0,-0.3410,-0.4255,-0.3410,0.5128,0.0,0.0,0.0,0.0,0.0,-0.3410,0.4255,0.3410,0.5128,0.0,0.0,0.0,0.0,0.0,-0.2559,0.0,0.0,0.3410,0.0,0.0,0.0,0.0,0.0,-0.2559,0.0,0.0,0.3410,0.0,0.0,0.0,0.0,0.0},
-  {1.6000,0.0,-0.7598,0.4732,0.1675,0.0,0.0,0.5840,0.0,0.0,-0.2466,0.0,0.0,-0.3315,-0.4130,-0.3315,0.5002,0.0,0.0,0.0,0.0,0.0,-0.3315,0.4130,0.3315,0.5002,0.0,0.0,0.0,0.0,0.0,-0.2490,0.0,0.0,0.3315,0.0,0.0,0.0,0.0,0.0,-0.2490,0.0,0.0,0.3315,0.0,0.0,0.0,0.0,0.0},
-  {1.6333,0.0,-0.7314,0.4543,0.1626,0.0,0.0,0.5650,0.0,0.0,-0.2359,0.0,0.0,-0.3191,-0.3964,-0.3191,0.4837,0.0,0.0,0.0,0.0,0.0,-0.3191,0.3964,0.3191,0.4837,0.0,0.0,0.0,0.0,0.0,-0.2399,0.0,0.0,0.3191,0.0,0.0,0.0,0.0,0.0,-0.2399,0.0,0.0,0.3191,0.0,0.0,0.0,0.0,0.0},
-  {1.6667,0.0,-0.6972,0.4315,0.1566,0.0,0.0,0.5421,0.0,0.0,-0.2229,0.0,0.0,-0.3042,-0.3765,-0.3042,0.4638,0.0,0.0,0.0,0.0,0.0,-0.3042,0.3765,0.3042,0.4638,0.0,0.0,0.0,0.0,0.0,-0.2289,0.0,0.0,0.3042,0.0,0.0,0.0,0.0,0.0,-0.2289,0.0,0.0,0.3042,0.0,0.0,0.0,0.0,0.0},
-  {1.7000,0.0,-0.6583,0.4055,0.1498,0.0,0.0,0.5161,0.0,0.0,-0.2082,0.0,0.0,-0.2872,-0.3539,-0.2872,0.4412,0.0,0.0,0.0,0.0,0.0,-0.2872,0.3539,0.2872,0.4412,0.0,0.0,0.0,0.0,0.0,-0.2165,0.0,0.0,0.2872,0.0,0.0,0.0,0.0,0.0,-0.2165,0.0,0.0,0.2872,0.0,0.0,0.0,0.0,0.0},
-  {1.7333,0.0,-0.6157,0.3771,0.1424,0.0,0.0,0.4876,0.0,0.0,-0.1921,0.0,0.0,-0.2686,-0.3291,-0.2686,0.4164,0.0,0.0,0.0,0.0,0.0,-0.2686,0.3291,0.2686,0.4164,0.0,0.0,0.0,0.0,0.0,-0.2028,0.0,0.0,0.2686,0.0,0.0,0.0,0.0,0.0,-0.2028,0.0,0.0,0.2686,0.0,0.0,0.0,0.0,0.0},
-  {1.7667,0.0,-0.5705,0.3470,0.1345,0.0,0.0,0.4573,0.0,0.0,-0.1750,0.0,0.0,-0.2489,-0.3028,-0.2489,0.3901,0.0,0.0,0.0,0.0,0.0,-0.2489,0.3028,0.2489,0.3901,0.0,0.0,0.0,0.0,0.0,-0.1884,0.0,0.0,0.2489,0.0,0.0,0.0,0.0,0.0,-0.1884,0.0,0.0,0.2489,0.0,0.0,0.0,0.0,0.0},
-  {1.8000,0.0,-0.5237,0.3158,0.1263,0.0,0.0,0.4260,0.0,0.0,-0.1573,0.0,0.0,-0.2285,-0.2756,-0.2285,0.3628,0.0,0.0,0.0,0.0,0.0,-0.2285,0.2756,0.2285,0.3628,0.0,0.0,0.0,0.0,0.0,-0.1734,0.0,0.0,0.2285,0.0,0.0,0.0,0.0,0.0,-0.1734,0.0,0.0,0.2285,0.0,0.0,0.0,0.0,0.0},
-  {1.8333,0.0,-0.4763,0.2842,0.1180,0.0,0.0,0.3943,0.0,0.0,-0.1394,0.0,0.0,-0.2078,-0.2480,-0.2078,0.3353,0.0,0.0,0.0,0.0,0.0,-0.2078,0.2480,0.2078,0.3353,0.0,0.0,0.0,0.0,0.0,-0.1582,0.0,0.0,0.2078,0.0,0.0,0.0,0.0,0.0,-0.1582,0.0,0.0,0.2078,0.0,0.0,0.0,0.0,0.0},
-  {1.8667,0.0,-0.4295,0.2530,0.1099,0.0,0.0,0.3630,0.0,0.0,-0.1217,0.0,0.0,-0.1874,-0.2208,-0.1874,0.3081,0.0,0.0,0.0,0.0,0.0,-0.1874,0.2208,0.1874,0.3081,0.0,0.0,0.0,0.0,0.0,-0.1433,0.0,0.0,0.1874,0.0,0.0,0.0,0.0,0.0,-0.1433,0.0,0.0,0.1874,0.0,0.0,0.0,0.0,0.0},
-  {1.9000,0.0,-0.3843,0.2229,0.1020,0.0,0.0,0.3328,0.0,0.0,-0.1046,0.0,0.0,-0.1677,-0.1945,-0.1677,0.2818,0.0,0.0,0.0,0.0,0.0,-0.1677,0.1945,0.1677,0.2818,0.0,0.0,0.0,0.0,0.0,-0.1288,0.0,0.0,0.1677,0.0,0.0,0.0,0.0,0.0,-0.1288,0.0,0.0,0.1677,0.0,0.0,0.0,0.0,0.0},
-  {1.9333,0.0,-0.3417,0.1945,0.0945,0.0,0.0,0.3043,0.0,0.0,-0.0885,0.0,0.0,-0.1491,-0.1697,-0.1491,0.2570,0.0,0.0,0.0,0.0,0.0,-0.1491,0.1697,0.1491,0.2570,0.0,0.0,0.0,0.0,0.0,-0.1152,0.0,0.0,0.1491,0.0,0.0,0.0,0.0,0.0,-0.1152,0.0,0.0,0.1491,0.0,0.0,0.0,0.0,0.0},
-  {1.9667,0.0,-0.3028,0.1685,0.0878,0.0,0.0,0.2782,0.0,0.0,-0.0738,0.0,0.0,-0.1321,-0.1471,-0.1321,0.2343,0.0,0.0,0.0,0.0,0.0,-0.1321,0.1471,0.1321,0.2343,0.0,0.0,0.0,0.0,0.0,-0.1027,0.0,0.0,0.1321,0.0,0.0,0.0,0.0,0.0,-0.1027,0.0,0.0,0.1321,0.0,0.0,0.0,0.0,0.0},
-  {2.0000,0.0,-0.2686,0.1457,0.0818,0.0,0.0,0.2553,0.0,0.0,-0.0608,0.0,0.0,-0.1172,-0.1272,-0.1172,0.2144,0.0,0.0,0.0,0.0,0.0,-0.1172,0.1272,0.1172,0.2144,0.0,0.0,0.0,0.0,0.0,-0.0918,0.0,0.0,0.1172,0.0,0.0,0.0,0.0,0.0,-0.0918,0.0,0.0,0.1172,0.0,0.0,0.0,0.0,0.0},
-  {2.0333,0.0,-0.2402,0.1268,0.0768,0.0,0.0,0.2363,0.0,0.0,-0.0501,0.0,0.0,-0.1048,-0.1106,-0.1048,0.1979,0.0,0.0,0.0,0.0,0.0,-0.1048,0.1106,0.1048,0.1979,0.0,0.0,0.0,0.0,0.0,-0.0827,0.0,0.0,0.1048,0.0,0.0,0.0,0.0,0.0,-0.0827,0.0,0.0,0.1048,0.0,0.0,0.0,0.0,0.0},
-  {2.0667,0.0,-0.2185,0.1124,0.0730,0.0,0.0,0.2218,0.0,0.0,-0.0419,0.0,0.0,-0.0954,-0.0981,-0.0954,0.1853,0.0,0.0,0.0,0.0,0.0,-0.0954,0.0981,0.0954,0.1853,0.0,0.0,0.0,0.0,0.0,-0.0757,0.0,0.0,0.0954,0.0,0.0,0.0,0.0,0.0,-0.0757,0.0,0.0,0.0954,0.0,0.0,0.0,0.0,0.0},
-  {2.1000,0.0,-0.2048,0.1032,0.0707,0.0,0.0,0.2127,0.0,0.0,-0.0367,0.0,0.0,-0.0894,-0.0901,-0.0894,0.1773,0.0,0.0,0.0,0.0,0.0,-0.0894,0.0901,0.0894,0.1773,0.0,0.0,0.0,0.0,0.0,-0.0714,0.0,0.0,0.0894,0.0,0.0,0.0,0.0,0.0,-0.0714,0.0,0.0,0.0894,0.0,0.0,0.0,0.0,0.0},
-  {2.1333,0.0,-0.2000,0.1000,0.0698,0.0,0.0,0.2094,0.0,0.0,-0.0349,0.0,0.0,-0.0873,-0.0873,-0.0873,0.1745,0.0,0.0,0.0,0.0,0.0,-0.0873,0.0873,0.0873,0.1745,0.0,0.0,0.0,0.0,0.0,-0.0698,0.0,0.0,0.0873,0.0,0.0,0.0,0.0,0.0,-0.0698,0.0,0.0,0.0873,0.0,0.0,0.0,0.0,0.0},
-  {2.1667,0.0,-0.1991,0.0995,0.0695,0.0,0.0,0.2085,0.0,0.0,-0.0347,0.0,0.0,-0.0869,-0.0869,-0.0869,0.1737,0.0,0.0,0.0,0.0,0.0,-0.0869,0.0869,0.0869,0.1737,0.0,0.0,0.0,0.0,0.0,-0.0695,0.0,0.0,0.0869,0.0,0.0,0.0,0.0,0.0,-0.0695,0.0,0.0,0.0869,0.0,0.0,0.0,0.0,0.0},
-  {2.2000,0.0,-0.1964,0.0982,0.0685,0.0,0.0,0.2056,0.0,0.0,-0.0343,0.0,0.0,-0.0857,-0.0857,-0.0857,0.1714,0.0,0.0,0.0,0.0,0.0,-0.0857,0.0857,0.0857,0.1714,0.0,0.0,0.0,0.0,0.0,-0.0685,0.0,0.0,0.0857,0.0,0.0,0.0,0.0,0.0,-0.0685,0.0,0.0,0.0857,0.0,0.0,0.0,0.0,0.0},
-  {2.2333,0.0,-0.1921,0.0960,0.0670,0.0,0.0,0.2011,0.0,0.0,-0.0335,0.0,0.0,-0.0838,-0.0838,-0.0838,0.1676,0.0,0.0,0.0,0.0,0.0,-0.0838,0.0838,0.0838,0.1676,0.0,0.0,0.0,0.0,0.0,-0.0670,0.0,0.0,0.0838,0.0,0.0,0.0,0.0,0.0,-0.0670,0.0,0.0,0.0838,0.0,0.0,0.0,0.0,0.0},
-  {2.2667,0.0,-0.1863,0.0931,0.0650,0.0,0.0,0.1951,0.0,0.0,-0.0325,0.0,0.0,-0.0813,-0.0813,-0.0813,0.1626,0.0,0.0,0.0,0.0,0.0,-0.0813,0.0813,0.0813,0.1626,0.0,0.0,0.0,0.0,0.0,-0.0650,0.0,0.0,0.0813,0.0,0.0,0.0,0.0,0.0,-0.0650,0.0,0.0,0.0813,0.0,0.0,0.0,0.0,0.0},
-  {2.3000,0.0,-0.1792,0.0896,0.0626,0.0,0.0,0.1877,0.0,0.0,-0.0313,0.0,0.0,-0.0782,-0.0782,-0.0782,0.1564,0.0,0.0,0.0,0.0,0.0,-0.0782,0.0782,0.0782,0.1564,0.0,0.0,0.0,0.0,0.0,-0.0626,0.0,0.0,0.0782,0.0,0.0,0.0,0.0,0.0,-0.0626,0.0,0.0,0.0782,0.0,0.0,0.0,0.0,0.0},
-  {2.3333,0.0,-0.1710,0.0855,0.0597,0.0,0.0,0.1790,0.0,0.0,-0.0298,0.0,0.0,-0.0746,-0.0746,-0.0746,0.1492,0.0,0.0,0.0,0.0,0.0,-0.0746,0.0746,0.0746,0.1492,0.0,0.0,0.0,0.0,0.0,-0.0597,0.0,0.0,0.0746,0.0,0.0,0.0,0.0,0.0,-0.0597,0.0,0.0,0.0746,0.0,0.0,0.0,0.0,0.0},
-  {2.3667,0.0,-0.1617,0.0809,0.0565,0.0,0.0,0.1694,0.0,0.0,-0.0282,0.0,0.0,-0.0706,-0.0706,-0.0706,0.1411,0.0,0.0,0.0,0.0,0.0,-0.0706,0.0706,0.0706,0.1411,0.0,0.0,0.0,0.0,0.0,-0.0565,0.0,0.0,0.0706,0.0,0.0,0.0,0.0,0.0,-0.0565,0.0,0.0,0.0706,0.0,0.0,0.0,0.0,0.0},
-  {2.4000,0.0,-0.1517,0.0758,0.0529,0.0,0.0,0.1588,0.0,0.0,-0.0265,0.0,0.0,-0.0662,-0.0662,-0.0662,0.1324,0.0,0.0,0.0,0.0,0.0,-0.0662,0.0662,0.0662,0.1324,0.0,0.0,0.0,0.0,0.0,-0.0529,0.0,0.0,0.0662,0.0,0.0,0.0,0.0,0.0,-0.0529,0.0,0.0,0.0662,0.0,0.0,0.0,0.0,0.0},
-  {2.4333,0.0,-0.1409,0.0705,0.0492,0.0,0.0,0.1476,0.0,0.0,-0.0246,0.0,0.0,-0.0615,-0.0615,-0.0615,0.1230,0.0,0.0,0.0,0.0,0.0,-0.0615,0.0615,0.0615,0.1230,0.0,0.0,0.0,0.0,0.0,-0.0492,0.0,0.0,0.0615,0.0,0.0,0.0,0.0,0.0,-0.0492,0.0,0.0,0.0615,0.0,0.0,0.0,0.0,0.0},
-  {2.4667,0.0,-0.1296,0.0648,0.0452,0.0,0.0,0.1357,0.0,0.0,-0.0226,0.0,0.0,-0.0565,-0.0565,-0.0565,0.1131,0.0,0.0,0.0,0.0,0.0,-0.0565,0.0565,0.0565,0.1131,0.0,0.0,0.0,0.0,0.0,-0.0452,0.0,0.0,0.0565,0.0,0.0,0.0,0.0,0.0,-0.0452,0.0,0.0,0.0565,0.0,0.0,0.0,0.0,0.0},
-  {2.5000,0.0,-0.1179,0.0590,0.0412,0.0,0.0,0.1235,0.0,0.0,-0.0206,0.0,0.0,-0.0514,-0.0514,-0.0514,0.1029,0.0,0.0,0.0,0.0,0.0,-0.0514,0.0514,0.0514,0.1029,0.0,0.0,0.0,0.0,0.0,-0.0412,0.0,0.0,0.0514,0.0,0.0,0.0,0.0,0.0,-0.0412,0.0,0.0,0.0514,0.0,0.0,0.0,0.0,0.0},
-  {2.5333,0.0,-0.1060,0.0530,0.0370,0.0,0.0,0.1110,0.0,0.0,-0.0185,0.0,0.0,-0.0462,-0.0462,-0.0462,0.0925,0.0,0.0,0.0,0.0,0.0,-0.0462,0.0462,0.0462,0.0925,0.0,0.0,0.0,0.0,0.0,-0.0370,0.0,0.0,0.0462,0.0,0.0,0.0,0.0,0.0,-0.0370,0.0,0.0,0.0462,0.0,0.0,0.0,0.0,0.0},
-  {2.5667,0.0,-0.0940,0.0470,0.0328,0.0,0.0,0.0984,0.0,0.0,-0.0164,0.0,0.0,-0.0410,-0.0410,-0.0410,0.0820,0.0,0.0,0.0,0.0,0.0,-0.0410,0.0410,0.0410,0.0820,0.0,0.0,0.0,0.0,0.0,-0.0328,0.0,0.0,0.0410,0.0,0.0,0.0,0.0,0.0,-0.0328,0.0,0.0,0.0410,0.0,0.0,0.0,0.0,0.0},
-  {2.6000,0.0,-0.0821,0.0410,0.0287,0.0,0.0,0.0860,0.0,0.0,-0.0143,0.0,0.0,-0.0358,-0.0358,-0.0358,0.0716,0.0,0.0,0.0,0.0,0.0,-0.0358,0.0358,0.0358,0.0716,0.0,0.0,0.0,0.0,0.0,-0.0287,0.0,0.0,0.0358,0.0,0.0,0.0,0.0,0.0,-0.0287,0.0,0.0,0.0358,0.0,0.0,0.0,0.0,0.0},
-  {2.6333,0.0,-0.0704,0.0352,0.0246,0.0,0.0,0.0737,0.0,0.0,-0.0123,0.0,0.0,-0.0307,-0.0307,-0.0307,0.0614,0.0,0.0,0.0,0.0,0.0,-0.0307,0.0307,0.0307,0.0614,0.0,0.0,0.0,0.0,0.0,-0.0246,0.0,0.0,0.0307,0.0,0.0,0.0,0.0,0.0,-0.0246,0.0,0.0,0.0307,0.0,0.0,0.0,0.0,0.0},
-  {2.6667,0.0,-0.0591,0.0295,0.0206,0.0,0.0,0.0619,0.0,0.0,-0.0103,0.0,0.0,-0.0258,-0.0258,-0.0258,0.0516,0.0,0.0,0.0,0.0,0.0,-0.0258,0.0258,0.0258,0.0516,0.0,0.0,0.0,0.0,0.0,-0.0206,0.0,0.0,0.0258,0.0,0.0,0.0,0.0,0.0,-0.0206,0.0,0.0,0.0258,0.0,0.0,0.0,0.0,0.0},
-  {2.7000,0.0,-0.0483,0.0242,0.0169,0.0,0.0,0.0506,0.0,0.0,-0.0084,0.0,0.0,-0.0211,-0.0211,-0.0211,0.0422,0.0,0.0,0.0,0.0,0.0,-0.0211,0.0211,0.0211,0.0422,0.0,0.0,0.0,0.0,0.0,-0.0169,0.0,0.0,0.0211,0.0,0.0,0.0,0.0,0.0,-0.0169,0.0,0.0,0.0211,0.0,0.0,0.0,0.0,0.0},
-  {2.7333,0.0,-0.0383,0.0191,0.0134,0.0,0.0,0.0401,0.0,0.0,-0.0067,0.0,0.0,-0.0167,-0.0167,-0.0167,0.0334,0.0,0.0,0.0,0.0,0.0,-0.0167,0.0167,0.0167,0.0334,0.0,0.0,0.0,0.0,0.0,-0.0134,0.0,0.0,0.0167,0.0,0.0,0.0,0.0,0.0,-0.0134,0.0,0.0,0.0167,0.0,0.0,0.0,0.0,0.0},
-  {2.7667,0.0,-0.0290,0.0145,0.0101,0.0,0.0,0.0304,0.0,0.0,-0.0051,0.0,0.0,-0.0127,-0.0127,-0.0127,0.0253,0.0,0.0,0.0,0.0,0.0,-0.0127,0.0127,0.0127,0.0253,0.0,0.0,0.0,0.0,0.0,-0.0101,0.0,0.0,0.0127,0.0,0.0,0.0,0.0,0.0,-0.0101,0.0,0.0,0.0127,0.0,0.0,0.0,0.0,0.0},
-  {2.8000,0.0,-0.0208,0.0104,0.0073,0.0,0.0,0.0218,0.0,0.0,-0.0036,0.0,0.0,-0.0091,-0.0091,-0.0091,0.0182,0.0,0.0,0.0,0.0,0.0,-0.0091,0.0091,0.0091,0.0182,0.0,0.0,0.0,0.0,0.0,-0.0073,0.0,0.0,0.0091,0.0,0.0,0.0,0.0,0.0,-0.0073,0.0,0.0,0.0091,0.0,0.0,0.0,0.0,0.0},
-  {2.8333,0.0,-0.0137,0.0069,0.0048,0.0,0.0,0.0144,0.0,0.0,-0.0024,0.0,0.0,-0.0060,-0.0060,-0.0060,0.0120,0.0,0.0,0.0,0.0,0.0,-0.0060,0.0060,0.0060,0.0120,0.0,0.0,0.0,0.0,0.0,-0.0048,0.0,0.0,0.0060,0.0,0.0,0.0,0.0,0.0,-0.0048,0.0,0.0,0.0060,0.0,0.0,0.0,0.0,0.0},
-  {2.8667,0.0,-0.0079,0.0040,0.0028,0.0,0.0,0.0083,0.0,0.0,-0.0014,0.0,0.0,-0.0035,-0.0035,-0.0035,0.0069,0.0,0.0,0.0,0.0,0.0,-0.0035,0.0035,0.0035,0.0069,0.0,0.0,0.0,0.0,0.0,-0.0028,0.0,0.0,0.0035,0.0,0.0,0.0,0.0,0.0,-0.0028,0.0,0.0,0.0035,0.0,0.0,0.0,0.0,0.0},
-  {2.9000,0.0,-0.0036,0.0018,0.0013,0.0,0.0,0.0038,0.0,0.0,-0.0006,0.0,0.0,-0.0016,-0.0016,-0.0016,0.0032,0.0,0.0,0.0,0.0,0.0,-0.0016,0.0016,0.0016,0.0032,0.0,0.0,0.0,0.0,0.0,-0.0013,0.0,0.0,0.0016,0.0,0.0,0.0,0.0,0.0,-0.0013,0.0,0.0,0.0016,0.0,0.0,0.0,0.0,0.0},
-  {2.9333,0.0,-0.0009,0.0005,0.0003,0.0,0.0,0.0010,0.0,0.0,-0.0002,0.0,0.0,-0.0004,-0.0004,-0.0004,0.0008,0.0,0.0,0.0,0.0,0.0,-0.0004,0.0004,0.0004,0.0008,0.0,0.0,0.0,0.0,0.0,-0.0003,0.0,0.0,0.0004,0.0,0.0,0.0,0.0,0.0,-0.0003,0.0,0.0,0.0004,0.0,0.0,0.0,0.0,0.0},
-  {2.9667,0.0,0.0000,0.0000,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0000,0.0000,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0,0.0000,0.0,0.0,0.0000,0.0,0.0,0.0,0.0,0.0},
+-- ReplicatedStorage/HammerRarityRoller.luau
+-- Authoritative module for 5-hammer rarities, round probability weights,
+-- and rarity-weighted anti-repeat spinner reel generation.
+
+local HammerRarityRoller = {}
+
+export type HammerRarity = "Common" | "Uncommon" | "Rare" | "Legendary" | "Mythical"
+
+export type HammerData = {
+	Rarity: HammerRarity,
+	DamagePercent: number,
 }
+
+-- Exact 5 Hammers (30% to 70% DMG)
+local HAMMERS: { [HammerRarity]: HammerData } = {
+	Common    = { Rarity = "Common",    DamagePercent = 30 },
+	Uncommon  = { Rarity = "Uncommon",  DamagePercent = 40 },
+	Rare      = { Rarity = "Rare",      DamagePercent = 50 },
+	Legendary = { Rarity = "Legendary", DamagePercent = 60 },
+	Mythical  = { Rarity = "Mythical",  DamagePercent = 70 },
+}
+HammerRarityRoller.HAMMERS = HAMMERS
+
+local RARITY_ORDER: { HammerRarity } = { "Common", "Uncommon", "Rare", "Legendary", "Mythical" }
+
+-- Round-by-Round Probability Weights (Sums to 100 every round)
+-- Rounds 1-2: Common + Uncommon = 70%
+-- Round 3:    Common + Uncommon = 50%
+-- Round 4:    Common + Uncommon = 40%
+-- Round 5:    Common + Uncommon = 25%
+-- Round 6+:   Common + Uncommon = 10%
+local ROUND_RARITY_WEIGHTS: { [number]: { [HammerRarity]: number } } = {
+	[1] = { Common = 40, Uncommon = 30, Rare = 18, Legendary = 9,  Mythical = 3  },
+	[2] = { Common = 32, Uncommon = 38, Rare = 16, Legendary = 10, Mythical = 4  },
+	[3] = { Common = 25, Uncommon = 25, Rare = 25, Legendary = 16, Mythical = 9  },
+	[4] = { Common = 18, Uncommon = 22, Rare = 25, Legendary = 21, Mythical = 14 },
+	[5] = { Common = 10, Uncommon = 15, Rare = 25, Legendary = 28, Mythical = 22 },
+	[6] = { Common = 4,  Uncommon = 6,  Rare = 20, Legendary = 35, Mythical = 35 },
+}
+
+local rng = Random.new()
+
+-- 1. Roll the Winning Hammer for the Round based on Rarity Weights
+function HammerRarityRoller.RollWinningHammer(roundNumber: number): HammerData
+	local clampedRound = math.clamp(roundNumber or 1, 1, 6)
+	local weights = ROUND_RARITY_WEIGHTS[clampedRound]
+
+	local totalWeight = 0
+	for _, rarity in ipairs(RARITY_ORDER) do
+		totalWeight += weights[rarity]
+	end
+
+	local roll = rng:NextNumber(0, totalWeight)
+	local cumulative = 0
+
+	for _, rarity in ipairs(RARITY_ORDER) do
+		cumulative += weights[rarity]
+		if roll <= cumulative then
+			return HammerRarityRoller.HAMMERS[rarity]
+		end
+	end
+
+	return HammerRarityRoller.HAMMERS.Common
+end
+
+-- 2. Generate a Rarity-Weighted Random Image Sequence for the Existing Spinner UI
+-- (Replaces predictable Common -> Uncommon -> Rare -> Legendary -> Mythical sequence)
+function HammerRarityRoller.BuildRandomSpinnerStrip(roundNumber: number, totalSlots: number, winningSlotIndex: number, winningRarity: HammerRarity): { HammerRarity }
+	local clampedRound = math.clamp(roundNumber or 1, 1, 6)
+	local weights = ROUND_RARITY_WEIGHTS[clampedRound]
+
+	local strip: { HammerRarity } = table.create(totalSlots)
+	local previousRarity: HammerRarity? = nil
+
+	for i = 1, totalSlots do
+		if i == winningSlotIndex then
+			strip[i] = winningRarity
+			previousRarity = winningRarity
+		else
+			-- Roll a random hammer weighted by rarity, ensuring no two adjacent images are the same!
+			local candidatePool = {}
+			local poolWeight = 0
+
+			for _, rarity in ipairs(RARITY_ORDER) do
+				local isAdjacentToWinner = (i == winningSlotIndex - 1 or i == winningSlotIndex + 1) and (rarity == winningRarity)
+				if rarity ~= previousRarity and not isAdjacentToWinner then
+					-- Keep rarity weighting + minimum visual weight (8) so high-tier hammers still flash by during early spins
+					local visualWeight = math.max(weights[rarity], 8)
+					poolWeight += visualWeight
+					table.insert(candidatePool, { Rarity = rarity, Weight = visualWeight })
+				end
+			end
+
+			local pickRoll = rng:NextNumber(0, poolWeight)
+			local accum = 0
+			local chosen: HammerRarity = "Common"
+
+			for _, entry in ipairs(candidatePool) do
+				accum += entry.Weight
+				if pickRoll <= accum then
+					chosen = entry.Rarity
+					break
+				end
+			end
+
+			strip[i] = chosen
+			previousRarity = chosen
+		end
+	end
+
+	return strip
+end
+
+return HammerRarityRoller
 ]]></string>
       </Properties>
     </Item>
-    <Item class="ModuleScript" referent="6">
+  </Item>
+  <Item class="ServerScriptService" referent="5">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="6">
       <Properties>
-        <string name="Name">GorillaSmashManager</string>
+        <string name="Name">R6AvatarManager</string>
+        <token name="RunContext">0</token>
         <string name="Source"><![CDATA[--!strict
--- GorillaSmashManager: Drives Gorilla-gem's authoritative 91-frame bone transform animation,
--- synchronizes frame-accurate impact timing at Frame 40 (t=1.33s), executes hit-stop weight,
--- triggers procedural VFX broadcast, and applies player damage.
+-- ServerScriptService/R6AvatarManager.server.luau
+-- Authoritative server-side R6 avatar pipeline for Bid-to-survive.
+-- Guarantees that every player spawns as an authentic Roblox R6 character wearing their
+-- exact live Roblox avatar appearance (skin tone, shirt, pants, face, hair & accessories)
+-- so custom R6 animations (Walk: 90697464892050, Run: 125757170550820, Dive: 137603926461078)
+-- articulate every joint natively with zero blank/black dummy issues.
+
+local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
+local StarterPlayer = game:GetService("StarterPlayer")
 
-local GorillaSmashManager = {}
-
--- Load 91-frame authoritative motion data
-local ServerScriptService = game:GetService("ServerScriptService")
-local motionDataModule = ReplicatedStorage:FindFirstChild("GorillaMotionData") or ServerScriptService:WaitForChild("GorillaMotionData", 10)
-local frames: {{number}} = if motionDataModule then require(motionDataModule) else {}
-
--- RemoteEvent setup for Client VFX, Shockwave, & Camera Shake
-local Network = ReplicatedStorage:FindFirstChild("Network")
-local ImpactRemote = (Network and Network:FindFirstChild("GorillaImpactEvent"))
-	or ReplicatedStorage:FindFirstChild("GorillaImpactEvent")
-
-if not ImpactRemote then
-	ImpactRemote = Instance.new("RemoteEvent")
-	ImpactRemote.Name = "GorillaImpactEvent"
-	ImpactRemote.Parent = Network or ReplicatedStorage
+-- 1. SAFETY CLEANUP: Destroy any blank StarterCharacter dummy that causes the "Black Mamba" bug!
+local badStarterChar = StarterPlayer:FindFirstChild("StarterCharacter")
+if badStarterChar then
+	warn("[R6AvatarManager] Removed blank StarterCharacter from StarterPlayer so real avatars load!")
+	badStarterChar:Destroy()
 end
 
-local function findGorillaModel(): Model?
-	return Workspace:FindFirstChild("Gorilla-gem")
-		or Workspace:FindFirstChild("Gorilla-gem", true)
-		or Workspace:FindFirstChild("MainGorilla", true)
+-- Fallback UserId for Studio Local Server test players (UserId <= 0)
+local FALLBACK_USER_ID = (game.CreatorType == Enum.CreatorType.User and game.CreatorId > 0) and game.CreatorId or 4883714528
+
+local convertingPlayers: { [Player]: boolean } = {}
+
+local function getCleanR6Description(player: Player): HumanoidDescription
+	local targetUserId = (player.UserId > 0) and player.UserId or FALLBACK_USER_ID
+
+	local ok, desc = pcall(function()
+		return Players:GetHumanoidDescriptionFromUserId(targetUserId)
+	end)
+
+	if not ok or not desc then
+		desc = Instance.new("HumanoidDescription")
+		-- Warm natural skin tone fallback instead of pitch black (0,0,0)
+		local defaultSkin = Color3.fromRGB(234, 184, 146)
+		desc.HeadColor = defaultSkin
+		desc.TorsoColor = Color3.fromRGB(45, 110, 210)
+		desc.LeftArmColor = defaultSkin
+		desc.RightArmColor = defaultSkin
+		desc.LeftLegColor = Color3.fromRGB(40, 45, 55)
+		desc.RightLegColor = Color3.fromRGB(40, 45, 55)
+	end
+
+	-- Clear R15 body package mesh overrides so R6 limbs remain classic blocky R6
+	-- while preserving ALL clothing, skin colors, face, t-shirt, and accessories!
+	desc.Torso = 0
+	desc.LeftArm = 0
+	desc.RightArm = 0
+	desc.LeftLeg = 0
+	desc.RightLeg = 0
+
+	return desc
 end
 
-local function findGameplayArea(): Instance?
-	local map = Workspace:FindFirstChild("BidToSurviveMap")
-	if map and map:FindFirstChild("GameplayArea") then
-		return map.GameplayArea
-	end
-	return Workspace:FindFirstChild("GameplayArea", true)
-end
+local function ensureAuthenticR6Avatar(player: Player, character: Model)
+	if convertingPlayers[player] then return end
 
--- Retrieve surface center, color, material, and radius from GameplayArea / Walkway
-local function getGameplaySurfaceData(): (Vector3, Color3, Enum.Material, number)
-	local gameplayArea = findGameplayArea()
-	if not gameplayArea then
-		warn("[GorillaSmash] GameplayArea not found in Workspace!")
-		return Vector3.new(0, 0, 0), Color3.fromRGB(115, 110, 100), Enum.Material.Slate, 45
-	end
+	local hum = character:WaitForChild("Humanoid", 5) :: Humanoid?
+	if not hum then return end
 
-	local walkway = gameplayArea:FindFirstChild("Walkway", true)
-	if walkway and walkway:IsA("BasePart") then
-		local topPos = walkway.Position + Vector3.new(0, walkway.Size.Y * 0.5, 0)
-		local radius = math.max(walkway.Size.X, walkway.Size.Z) * 0.5
-		return topPos, walkway.Color, walkway.Material, radius
-	end
-
-	if gameplayArea:IsA("BasePart") then
-		local topPos = gameplayArea.Position + Vector3.new(0, gameplayArea.Size.Y * 0.5, 0)
-		return topPos, gameplayArea.Color, gameplayArea.Material, math.max(gameplayArea.Size.X, gameplayArea.Size.Z) * 0.5
-	elseif gameplayArea:IsA("Model") then
-		local cf, size = gameplayArea:GetBoundingBox()
-		local basePart = gameplayArea.PrimaryPart or gameplayArea:FindFirstChildWhichIsA("BasePart", true)
-		local topPos = cf.Position + Vector3.new(0, size.Y * 0.5, 0)
-		local color = basePart and basePart.Color or Color3.fromRGB(115, 110, 100)
-		local mat = basePart and basePart.Material or Enum.Material.Slate
-		return topPos, color, mat, math.max(size.X, size.Z) * 0.5
-	end
-
-	return Vector3.new(0, 0, 0), Color3.fromRGB(115, 110, 100), Enum.Material.Slate, 45
-end
-
-local function findBone(parent: Instance, name: string): Bone?
-	for _, child in ipairs(parent:GetChildren()) do
-		if child:IsA("Bone") then
-			if child.Name == name then return child end
-			local f = findBone(child, name)
-			if f then return f end
-		end
-	end
-	return nil
-end
-
-local function ang(x: number, y: number, z: number): CFrame
-	return CFrame.fromEulerAnglesXYZ(x, y, z)
-end
-
--- Rig state cache
-local gorillaModel: Model? = nil
-local char1Mesh: MeshPart? = nil
-local cachedBones: {[string]: Bone} = {}
-local isPlaying = false
-
-local function prepareRig()
-	gorillaModel = findGorillaModel()
-	if not gorillaModel then
-		warn("[GorillaSmash] FATAL: Gorilla-gem model not found in Workspace!")
-		return false
-	end
-
-	char1Mesh = gorillaModel:FindFirstChild("char1", true) :: MeshPart?
-	if not char1Mesh then
-		warn("[GorillaSmash] FATAL: char1 MeshPart not found in Gorilla-gem!")
-		return false
-	end
-
-	gorillaModel.PrimaryPart = char1Mesh
-	char1Mesh.Anchored = true
-
-	-- Unanchor hammer parts so RigidConstraint can move hammer with hand bone
-	local hammer = gorillaModel:FindFirstChild("Thors Hammer", true) or Workspace:FindFirstChild("Thors Hammer")
-	if hammer and hammer.Parent ~= gorillaModel then
-		hammer.Parent = gorillaModel
-	end
-
-	local unanchoredCount = 0
-	for _, desc in ipairs(gorillaModel:GetDescendants()) do
-		if desc:IsA("BasePart") and desc ~= char1Mesh then
-			desc.Anchored = false
-			desc.CanCollide = false
-			if hammer and desc:IsDescendantOf(hammer) then
-				desc.Massless = true
-			end
-			unanchoredCount += 1
+	local function stripDefaultRobloxHealth(char: Model)
+		local defaultHealth = char:FindFirstChild("Health")
+		if defaultHealth and defaultHealth:IsA("Script") then
+			defaultHealth.Disabled = true
+			defaultHealth:Destroy()
 		end
 	end
 
-	-- Cache all 15 active bones
-	cachedBones = {
-		Hips = findBone(char1Mesh, "Hips") :: Bone,
-		Spine = findBone(char1Mesh, "Spine") :: Bone,
-		Head = findBone(char1Mesh, "Head") :: Bone,
-		RightArm = findBone(char1Mesh, "RightArm") :: Bone,
-		RightForeArm = findBone(char1Mesh, "RightForeArm") :: Bone,
-		RightHand = findBone(char1Mesh, "RightHand") :: Bone,
-		LeftArm = findBone(char1Mesh, "LeftArm") :: Bone,
-		LeftForeArm = findBone(char1Mesh, "LeftForeArm") :: Bone,
-		LeftHand = findBone(char1Mesh, "LeftHand") :: Bone,
-		RightUpLeg = findBone(char1Mesh, "RightUpLeg") :: Bone,
-		RightLeg = findBone(char1Mesh, "RightLeg") :: Bone,
-		RightFoot = findBone(char1Mesh, "RightFoot") :: Bone,
-		LeftUpLeg = findBone(char1Mesh, "LeftUpLeg") :: Bone,
-		LeftLeg = findBone(char1Mesh, "LeftLeg") :: Bone,
-		LeftFoot = findBone(char1Mesh, "LeftFoot") :: Bone,
-	}
-
-	print(string.format("[GorillaSmash] [RIG] Rig ready! 1 Anchored (char1), %d unanchored (hammer). 15/15 Bones mapped.", unanchoredCount))
-	return true
-end
-
--- Public: Execute 91-frame hammer smash with frame-accurate impact at frame 40
-function GorillaSmashManager.ExecuteSmashAndDamage(onImpactDamageCallback: (() -> ())?)
-	if isPlaying then
-		warn("[GorillaSmash] Smash already in progress, ignoring duplicate call.")
+	-- If already R6, verify BodyColors is not pitch black from an empty template
+	if hum.RigType == Enum.HumanoidRigType.R6 then
+		stripDefaultRobloxHealth(character)
+		local bodyColors = character:FindFirstChildOfClass("BodyColors")
+		if bodyColors and bodyColors.HeadColor3 == Color3.new(0, 0, 0) and not character:FindFirstChildOfClass("Shirt") then
+			convertingPlayers[player] = true
+			local desc = getCleanR6Description(player)
+			pcall(function()
+				hum:ApplyDescription(desc)
+			end)
+			convertingPlayers[player] = false
+		end
+		print(string.format("[R6AvatarManager] ✅ %s is authentic R6 with full avatar appearance.", player.Name))
+		player:SetAttribute("R6RigReady", true)
+		print(string.format("[BOOT HIERARCHY] 👤 Step 1: %s verified authentic R6 character. R6RigReady=true.", player.Name))
 		return
 	end
 
-	if not prepareRig() or not gorillaModel then
-		warn("[GorillaSmash] Rig could not be prepared, firing callback immediately.")
-		if onImpactDamageCallback then task.spawn(onImpactDamageCallback) end
-		return
-	end
+	-- Convert R15 -> Official Roblox R6 Model with full avatar clothing, skin, face & accessories!
+	convertingPlayers[player] = true
 
-	isPlaying = true
+	local spawnCF = character:GetPivot()
+	local desc = getCleanR6Description(player)
 
-	local impactPos, floorColor, floorMaterial, arenaRadius = getGameplaySurfaceData()
-	print(string.format("[GorillaSmash] [EXECUTE] Target arena: pos=%s, radius=%.1f", tostring(impactPos), arenaRadius))
+	local ok, r6Model = pcall(function()
+		return Players:CreateHumanoidModelFromDescription(desc, Enum.HumanoidRigType.R6)
+	end)
 
-	-- Orient Gorilla-gem horizontally towards impact center
-	local rootCFrame = gorillaModel:GetPivot()
-	local lookTarget = Vector3.new(impactPos.X, rootCFrame.Position.Y, impactPos.Z)
-	if (lookTarget - rootCFrame.Position).Magnitude > 0.5 then
-		gorillaModel:PivotTo(CFrame.lookAt(rootCFrame.Position, lookTarget))
-		print("[GorillaSmash] [EXECUTE] Gorilla pivoted to face arena center.")
-	end
+	if ok and r6Model then
+		r6Model.Name = player.Name
+		stripDefaultRobloxHealth(r6Model)
 
-	-- Trigger swing audio on hammer handle
-	local hammer = gorillaModel:FindFirstChild("Thors Hammer", true) or Workspace:FindFirstChild("Thors Hammer")
-	local handle = hammer and hammer:FindFirstChild("Handle")
-	if handle then
-		local swingSound = handle:FindFirstChild("SwingSound") or handle:FindFirstChild("slash")
-		if not swingSound then
-			swingSound = Instance.new("Sound")
-			swingSound.Name = "SwingSound"
-			swingSound.SoundId = "rbxassetid://12222216"
-			swingSound.Volume = 2.0
-			swingSound.PlaybackSpeed = 0.95
-			swingSound.Parent = handle
-		end
-		swingSound:Play()
-		print("[GorillaSmash] [AUDIO] Swing sound triggered.")
-	end
-
-	-- Broadcast SMASH_START to all clients so they run the 91-frame bone playback locally
-	ImpactRemote:FireAllClients("SMASH_START", impactPos, floorColor, floorMaterial, arenaRadius)
-	print("[GorillaSmash] [NETWORK] Broadcast 'SMASH_START' to all clients.")
-
-	-- Execute the 91-frame bone motion playback on server as well
-	task.spawn(function()
-		local totalFrames = #frames
-		local fps = 30
-		local frameDur = 1 / fps
-		local impactTriggered = false
-		local IMPACT_FRAME = 40 -- Authoritative ground strike frame (40 / 30fps = 1.33s)
-
-		print(string.format("[GorillaSmash] [ANIMATION] Starting 91-frame motion playback (%d frames @ 30 FPS)...", totalFrames))
-
-		for i = 1, totalFrames do
-			local fd = frames[i]
-			if not fd then continue end
-
-			local dx, dy, dz = fd[2], fd[3], fd[4]
-			local rrx, rry, rrz = fd[5], fd[6], fd[7]
-
-			-- Hips root translation and rotation
-			if cachedBones.Hips then
-				cachedBones.Hips.Transform = CFrame.new(dx, dy, dz) * ang(rrx, rry, rrz)
-			end
-
-			-- Torso pitch & head
-			if cachedBones.Spine then cachedBones.Spine.Transform = ang(fd[8], fd[9], fd[10]) end
-			if cachedBones.Head then cachedBones.Head.Transform = ang(fd[11], fd[12], fd[13]) end
-
-			-- Right Arm (holding Thor's Hammer via RigidConstraint)
-			if cachedBones.RightArm then cachedBones.RightArm.Transform = ang(fd[14], fd[15], fd[16]) end
-			if cachedBones.RightForeArm then cachedBones.RightForeArm.Transform = ang(fd[17], fd[18], fd[19]) end
-			if cachedBones.RightHand then cachedBones.RightHand.Transform = ang(fd[20], fd[21], fd[22]) end
-
-			-- Left Arm (two-handed grip on hammer handle)
-			if cachedBones.LeftArm then cachedBones.LeftArm.Transform = ang(fd[23], fd[24], fd[25]) end
-			if cachedBones.LeftForeArm then cachedBones.LeftForeArm.Transform = ang(fd[26], fd[27], fd[28]) end
-			if cachedBones.LeftHand then cachedBones.LeftHand.Transform = ang(fd[29], fd[30], fd[31]) end
-
-			-- Legs & feet
-			if cachedBones.RightUpLeg then cachedBones.RightUpLeg.Transform = ang(fd[32], fd[33], fd[34]) end
-			if cachedBones.RightLeg then cachedBones.RightLeg.Transform = ang(fd[35], fd[36], fd[37]) end
-			if cachedBones.RightFoot then cachedBones.RightFoot.Transform = ang(fd[38], fd[39], fd[40]) end
-
-			if cachedBones.LeftUpLeg then cachedBones.LeftUpLeg.Transform = ang(fd[41], fd[42], fd[43]) end
-			if cachedBones.LeftLeg then cachedBones.LeftLeg.Transform = ang(fd[44], fd[45], fd[46]) end
-			if cachedBones.LeftFoot then cachedBones.LeftFoot.Transform = ang(fd[47], fd[48], fd[49]) end
-
-			-- Frame 40: EXACT GROUND SMASH IMPACT!
-			if i == IMPACT_FRAME and not impactTriggered then
-				impactTriggered = true
-				print(string.format("[GorillaSmash] [IMPACT] 💥💥💥 FRAME %d IMPACT FIRED! 💥💥💥", i))
-
-				-- 1. Broadcast Client VFX, Shockwave Rings, Camera Trauma & Sub-Bass Audio
-				ImpactRemote:FireAllClients(impactPos, floorColor, floorMaterial, arenaRadius)
-
-				-- 2. Execute server player damage on exact impact frame
-				if onImpactDamageCallback then
-					task.spawn(onImpactDamageCallback)
+		-- Copy StarterCharacterScripts into the new R6 character
+		local scs = StarterPlayer:FindFirstChild("StarterCharacterScripts")
+		if scs then
+			for _, item in ipairs(scs:GetChildren()) do
+				if not r6Model:FindFirstChild(item.Name) then
+					item:Clone().Parent = r6Model
 				end
-
-				-- 3. Heavy hit-stop pause on impact (0.12s)
-				print("[GorillaSmash] [HIT-STOP] Applying 0.12s hit-stop freeze...")
-				task.wait(0.12)
-				print("[GorillaSmash] [HIT-STOP] Hit-stop ended. Continuing follow-through.")
-			else
-				task.wait(frameDur)
 			end
 		end
 
-		print("[GorillaSmash] [ANIMATION] Smash animation finished. Blending bones back to rest pose.")
-
-		-- Smoothly reset bone transforms back to identity rest pose over 0.25s
-		local steps = 8
-		for s = 1, steps do
-			local alpha = 1 - (s / steps)
-			for _, bone in pairs(cachedBones) do
-				bone.Transform = bone.Transform:Lerp(CFrame.new(), 1 - alpha)
+		r6Model:PivotTo(spawnCF)
+		r6Model.Parent = Workspace
+		player.Character = r6Model
+		task.defer(function()
+			if character and character.Parent then
+				character:Destroy()
 			end
-			task.wait(0.03)
-		end
+		end)
 
-		for _, bone in pairs(cachedBones) do
-			bone.Transform = CFrame.new()
-		end
+		player:SetAttribute("R6RigReady", true)
+		print(string.format("[R6AvatarManager] 🔄 Converted %s from R15 to authentic R6 with full avatar appearance!", player.Name))
+		print(string.format("[BOOT HIERARCHY] 👤 Step 1: %s converted to authentic R6 character. R6RigReady=true.", player.Name))
+	else
+		warn(string.format("[R6AvatarManager] Failed to build R6 model for %s: %s", player.Name, tostring(r6Model)))
+	end
 
-		isPlaying = false
-		print("[GorillaSmash] [ANIMATION] Rest pose restored. Ready for next smash.")
+	task.delay(0.1, function()
+		convertingPlayers[player] = false
 	end)
 end
 
--- Manual trigger listener (e.g. from pressing 'E' key)
-ImpactRemote.OnServerEvent:Connect(function(player: Player, action: any)
-	if action == "TRIGGER_SMASH" or action == "TEST_SMASH" then
-		print(string.format("[GorillaSmash] 🕹️ Manual smash triggered by player: %s (Key 'E')", player.Name))
-		GorillaSmashManager.ExecuteSmashAndDamage(function()
-			print("[GorillaSmash] 💥 Manual impact executed successfully!")
-		end)
+local function onPlayerAdded(player: Player)
+	player.CharacterAdded:Connect(function(character)
+		task.defer(ensureAuthenticR6Avatar, player, character)
+	end)
+	if player.Character then
+		task.defer(ensureAuthenticR6Avatar, player, player.Character)
 	end
-end)
+end
 
--- Initialize on server startup
-task.spawn(function()
-	task.wait(1)
-	prepareRig()
-end)
+for _, player in ipairs(Players:GetPlayers()) do
+	onPlayerAdded(player)
+end
+Players.PlayerAdded:Connect(onPlayerAdded)
 
-return GorillaSmashManager
+print("[R6AvatarManager] Initialized: Authentic Roblox R6 Avatar Pipeline active.")
 ]]></string>
       </Properties>
     </Item>
@@ -657,7 +525,6 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local RuinsDoorHandManager = require(ServerScriptService:WaitForChild("RuinsDoorHandManager"))
-local GorillaSmashManager = require(ServerScriptService:WaitForChild("GorillaSmashManager"))
 local Network = ReplicatedStorage:WaitForChild("Network")
 
 local StateChanged = Network:WaitForChild("StateChanged")
@@ -687,6 +554,19 @@ if not ParticipationChanged then
     ParticipationChanged.Name = "ParticipationChanged"
     ParticipationChanged.Parent = Network
 end
+
+-- Ensure ClientLoadReadyEvent RemoteEvent exists
+local ClientLoadReadyEvent = Network:FindFirstChild("ClientLoadReadyEvent")
+if not ClientLoadReadyEvent then
+    ClientLoadReadyEvent = Instance.new("RemoteEvent")
+    ClientLoadReadyEvent.Name = "ClientLoadReadyEvent"
+    ClientLoadReadyEvent.Parent = Network
+end
+
+ClientLoadReadyEvent.OnServerEvent:Connect(function(player)
+    player:SetAttribute("ClientReady", true)
+    print(string.format("[BOOT HIERARCHY] 📥 Received ClientLoadReadyEvent from %s. ClientReady=true", player.Name))
+end)
 
 local Map = workspace:WaitForChild("BidToSurviveMap")
 local SpawnArea = Map:WaitForChild("SpawnArea")
@@ -767,7 +647,8 @@ local function BroadcastState(phaseName, duration, extra)
         Rarity = CurrentRarity,
         LivingCount = livingCount,
         ExposedPlayer = ExposedPlayerId and PlayerData[ExposedPlayerId] and PlayerData[ExposedPlayerId].Name or nil,
-        Extra = extra
+        Extra = extra,
+        SpinnerReel = extra and extra.SpinnerReel or nil,
     })
 end
 
@@ -958,7 +839,10 @@ local function TriggerHammerSmash(rarity, onImpactCallback, customPlayerData)
         onImpactCallback,
         customPlayerData,
         function(isOpen)
-            local ruinsDoor = workspace:FindFirstChild("Ruins door") or workspace:FindFirstChild("RuinsDoor")
+            local map = workspace:FindFirstChild("BidToSurviveMap")
+            local ruinsDoor = (map and (map:FindFirstChild("Ruins door") or map:FindFirstChild("RuinsDoor")))
+                or workspace:FindFirstChild("Ruins door")
+                or workspace:FindFirstChild("RuinsDoor")
             if ruinsDoor then
                 for _, desc in ipairs(ruinsDoor:GetDescendants()) do
                     local nameLower = desc.Name:lower()
@@ -1067,8 +951,10 @@ local function RunMatch(session)
             break
         end
         
-        -- Roll Server-Authoritative Rarity
-        CurrentRarity = GameConfig.RollRarity()
+        -- Roll Server-Authoritative Rarity using Round-by-Round Probability Weights
+        CurrentRarity = GameConfig.RollRarity(CurrentRound)
+        local spinnerReel = GameConfig.BuildRandomSpinnerStrip(CurrentRound, 19, 19, CurrentRarity.Name)
+        print(string.format("[ROUND] Rolled Hammer for Round %d: %s (%d%% DMG)", CurrentRound, CurrentRarity.Name, CurrentRarity.DamagePercent))
         
         ------------------------------------------------------------------------
         -- PHASE 1: SPAWN / HAMMER ROULETTE REVEAL
@@ -1093,6 +979,7 @@ local function RunMatch(session)
         BroadcastState("Phase1_Spawn", spawnDuration, {
             Round = CurrentRound,
             Rarity = CurrentRarity,
+            SpinnerReel = spinnerReel,
             RouletteDuration = GameConfig.RouletteDuration or 6.0,
             HoldDuration = GameConfig.RouletteHoldTime or 1.5,
         })
@@ -1224,25 +1111,20 @@ local function RunMatch(session)
         print(string.format("[ROUND] Rankings END elapsed=%.2f", os.clock() - p4Start))
         
         ------------------------------------------------------------------------
-        -- PHASE 5: THE SURVIVAL STANCE (Neon Green Shield Visible, 9s)
+        -- PHASE 5: THE SURVIVAL STANCE & RUINS DOOR HAZARD SMASH (9s)
         ------------------------------------------------------------------------
         local scrambleDuration = GameConfig.ScrambleTime or 9.0
         print(string.format("[ROUND] SurvivalStance START duration=%.1f", scrambleDuration))
         local p5Start = os.clock()
         
         BroadcastState("Phase5_Scramble", scrambleDuration, { SafeCount = safeCount })
-        task.wait(scrambleDuration)
-        print(string.format("[ROUND] SurvivalStance END elapsed=%.2f", os.clock() - p5Start))
-        
-        ------------------------------------------------------------------------
-        -- PHASE 6: HAMMER SMASH (Neon Shield Protects Winners)
-        ------------------------------------------------------------------------
-        print("[ROUND] HammerSmash START (Ruins Door Hand Hazard)")
-        local p6Start = os.clock()
-        
-        BroadcastState("Phase6_Smash", 6, { Rarity = CurrentRarity })
         
         local dmg = math.floor((GameConfig.MaxHealth * CurrentRarity.DamagePercent) / 100)
+        
+        -- Trigger Phase 6 Hammer Smash notification as the arm apex raise/slam approaches
+        task.delay(1.5, function()
+            BroadcastState("Phase6_Smash", 4.0, { Rarity = CurrentRarity })
+        end)
         
         TriggerHammerSmash(CurrentRarity, function(escapedPlayers, hitPlayers)
             -- Impact damage applied ONLY to players caught inside the 80% Red Circle and unprotected!
@@ -1283,7 +1165,7 @@ local function RunMatch(session)
         end, PlayerData)
         
         ClearWinnerGlow()
-        print(string.format("[ROUND] HammerSmash END elapsed=%.2f", os.clock() - p6Start))
+        print(string.format("[ROUND] SurvivalStance & Smash END elapsed=%.2f", os.clock() - p5Start))
         
         ------------------------------------------------------------------------
         -- PHASE 7: SETTLEMENT & ELIMINATIONS (4 Seconds)
@@ -1471,12 +1353,32 @@ Players.PlayerRemoving:Connect(function(player)
     PlayerData[player.UserId] = nil
 end)
 
+local function GetReadyEligiblePlayers()
+    local ready = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        local data = PlayerData[player.UserId]
+        local isAfk = player:GetAttribute("IsAFK") or (data and data.IsAFK)
+        local isClientReady = player:GetAttribute("ClientReady") == true
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local isR6 = hum and hum.RigType == Enum.HumanoidRigType.R6
+        local isLiving = hum and hum.Health > 0
+        if not isAfk and isClientReady and isR6 and isLiving then
+            table.insert(ready, player)
+        end
+    end
+    return ready
+end
+
 -- Main Server Lifecycle Loop
 task.spawn(function()
-    task.wait(1.5)
     while true do
-        local count = #Players:GetPlayers()
-        if count >= GameConfig.MinPlayersToStart then
+        local readyPlayers = GetReadyEligiblePlayers()
+        if #readyPlayers < GameConfig.MinPlayersToStart then
+            BroadcastState("WaitingForPlayers", 0, { Needed = GameConfig.MinPlayersToStart, Reason = "Waiting for R6 avatar, animations and map to load" })
+            task.wait(0.5)
+        else
+            print("[BOOT HIERARCHY] ✅ Step 1 (R6 Rig) -> Step 2 (Walk/Run/Dive Anims) -> Step 3 (Ruins Door Ready) complete! Starting LobbyCountdown.")
             CurrentRoundSession = CurrentRoundSession + 1
             local session = CurrentRoundSession
             
@@ -1486,8 +1388,9 @@ task.spawn(function()
             
             local cancelled = false
             for sec = duration, 1, -1 do
-                if #Players:GetPlayers() < GameConfig.MinPlayersToStart or session ~= CurrentRoundSession then
-                    print("[ROUND] LobbyCountdown CANCELLED (players left)")
+                local curReady = GetReadyEligiblePlayers()
+                if #curReady < GameConfig.MinPlayersToStart or session ~= CurrentRoundSession then
+                    print("[ROUND] LobbyCountdown CANCELLED (players left or unready)")
                     cancelled = true
                     break
                 end
@@ -1495,13 +1398,10 @@ task.spawn(function()
                 task.wait(1)
             end
             
-            if not cancelled and session == CurrentRoundSession and #Players:GetPlayers() >= GameConfig.MinPlayersToStart then
+            if not cancelled and session == CurrentRoundSession and #GetReadyEligiblePlayers() >= GameConfig.MinPlayersToStart then
                 print(string.format("[ROUND] LobbyCountdown END elapsed=%.2f", os.clock() - countdownStart))
                 RunMatch(session)
             end
-        else
-            BroadcastState("WaitingForPlayers", 0, { Needed = GameConfig.MinPlayersToStart })
-            task.wait(1.5)
         end
     end
 end)
@@ -1570,107 +1470,114 @@ local function toStudioCFrame(pos: Vector3, rotDeg: Vector3): CFrame
 end
 
 -- ============================================================================
--- EXACT STUDIO COORDINATES & ORIENTATIONS (YXZ DEGREES)
+-- EXACT STUDIO COORDINATES & ANATOMICAL WRIST JOINTS
 -- ============================================================================
+-- Visual anatomical wrist joint locations:
+-- LowerArm: size (17.52, 91.09, 24.47), shoulder at +Y, wrist socket at -Y
+-- SubHand:  size (25.07, 55.82, 32.11), wrist socket at +Y, palm/fingers at -Y
+local ARM_SHOULDER_LOCAL = Vector3.new(2.36035, 44.54465, 0)
+local ARM_WRIST_LOCAL    = Vector3.new(-2.36035, -44.54465, 0)
+local HAND_WRIST_LOCAL   = Vector3.new(-7.92460, 27.82055, 1.308)
+
+local BASE_HIT_ARM = toStudioCFrame(Vector3.new(-220.23, 86.704, -23.81), Vector3.new(18.125, -166.564, -62.174))
+local BASE_HIT_HAND = toStudioCFrame(Vector3.new(-151.714, 61.17, -30.17), Vector3.new(18.125, -166.564, -88.626))
+
+local BASE_RAISE_ARM = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682))
+local BASE_RAISE_REL_ROT = BASE_RAISE_ARM.Rotation:Inverse() * toStudioCFrame(Vector3.new(-193.164, 191.594, -64.161), Vector3.new(18.125, -166.564, -166.133)).Rotation
+local BASE_RAISE_WRIST = BASE_RAISE_ARM:PointToWorldSpace(ARM_WRIST_LOCAL)
+local BASE_RAISE_HAND = CFrame.new(BASE_RAISE_WRIST) * (BASE_RAISE_ARM.Rotation * BASE_RAISE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
+
+local BASE_EMERGE_ARM = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682))
+local BASE_EMERGE_REL_ROT = CFrame.Angles(0, 0, math.rad(63.549))
+local BASE_EMERGE_WRIST = BASE_EMERGE_ARM:PointToWorldSpace(ARM_WRIST_LOCAL)
+local BASE_EMERGE_HAND = CFrame.new(BASE_EMERGE_WRIST) * (BASE_EMERGE_ARM.Rotation * BASE_EMERGE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
+
 local POSES = {
 	DoorOrigin = toStudioCFrame(Vector3.new(-258.076, 102.018, -30.455), Vector3.new(-90, -90, 0)),
 	DoorOpen   = toStudioCFrame(Vector3.new(-258.076, 102.018, -77.145), Vector3.new(-90, -90, 0)),
 
 	BlackHoleTargetScale = 3.804,
-
-	-- Shoulder / Portal pivot inside the Ruins Door
-	PortalShoulderPivot = Vector3.new(-245.0, 102.018, -30.455),
+	PortalShoulderPivot  = Vector3.new(-258.0, 104.0, -25.0),
 
 	-- 1) Emerge Out of Portal
 	Emerge = {
-		MainHand = toStudioCFrame(Vector3.new(-198.174, 91.394, -29.243), Vector3.new(18.125, -166.564, -31.134)),
-		SubHand  = toStudioCFrame(Vector3.new(-179.856, 154.081, -54.716), Vector3.new(18.125, -166.564, -76.133)),
-		LowerArm = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682)),
+		SubHand  = BASE_EMERGE_HAND,
+		LowerArm = BASE_EMERGE_ARM,
 	},
 
-	-- 2) Raise of Hand (Apex Wind-up)
+	-- 2) Raise of Hand (Apex Wind-up - Towers high with 0.00 wrist gap)
 	Raise = {
-		MainHand = toStudioCFrame(Vector3.new(-207.17, 129.235, -39.829), Vector3.new(18.125, -166.564, -76.134)),
-		SubHand  = toStudioCFrame(Vector3.new(-207.17, 129.235, -39.829), Vector3.new(18.125, -166.564, -76.134)),
-		LowerArm = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682)),
+		SubHand  = BASE_RAISE_HAND,
+		LowerArm = BASE_RAISE_ARM,
 	},
 
-	-- 3) Hitting Ground (Violent Slam Base Pose)
+	-- 3) Hitting Ground (Base Violent Slam Pose)
 	HitGround = {
-		MainHand = toStudioCFrame(Vector3.new(-218.412, 65.568, -15.716), Vector3.new(18.125, -166.564, 1.374)),
-		SubHand  = toStudioCFrame(Vector3.new(-151.714, 61.17, -30.17),   Vector3.new(18.125, -166.564, -88.626)),
-		LowerArm = toStudioCFrame(Vector3.new(-220.23, 86.704, -23.81),   Vector3.new(18.125, -166.564, -62.174)),
+		SubHand  = BASE_HIT_HAND,
+		LowerArm = BASE_HIT_ARM,
 	}
 }
 
--- ============================================================================
--- KINEMATIC SHOULDER-ANCHORED SOLVER & ANATOMICAL WRIST HINGE
--- ============================================================================
-local PORTAL_PIVOT = POSES.PortalShoulderPivot -- Vector3.new(-245.0, 102.018, -30.455)
-local BASE_HIT_ARM = POSES.HitGround.LowerArm
-local BASE_HIT_SUB = POSES.HitGround.SubHand
-local BASE_HIT_MAIN = POSES.HitGround.MainHand
+-- Direction, length and baseline parameters of LowerArm
+local BASE_ARM_ROT = BASE_HIT_ARM.Rotation
+local BASE_HAND_ROT = BASE_HIT_HAND.Rotation
+local BASE_ARM_VEC = BASE_HIT_ARM:PointToWorldSpace(ARM_WRIST_LOCAL) - BASE_HIT_ARM:PointToWorldSpace(ARM_SHOULDER_LOCAL)
+local BASE_ARM_DIR = BASE_ARM_VEC.Unit
+local ARM_LENGTH = BASE_ARM_VEC.Magnitude -- 89.214 studs
 
--- Visual anatomical wrist joint locations:
--- LowerArm: size (17.52, 91.09, 24.47), wrist tip is at -Y (-45.54 studs)
--- SubHand:  size (25.07, 55.82, 32.11), wrist base is at +Y (+27.91 studs)
-local ARM_WRIST_LOCAL  = Vector3.new(0, -45.54, 0)
-local HAND_WRIST_LOCAL = Vector3.new(-5.368, 27.981, 1.308)
-
-local HIT_REL_HAND_TO_ARM = BASE_HIT_ARM:Inverse() * BASE_HIT_SUB
-local HIT_REL_MAIN_TO_HAND = BASE_HIT_SUB:Inverse() * BASE_HIT_MAIN
-
-local BASE_RAISE_ARM = POSES.Raise.LowerArm
-local BASE_RAISE_SUB = POSES.Raise.SubHand
-local BASE_RAISE_MAIN = POSES.Raise.MainHand
-local RAISE_REL_HAND_TO_ARM = BASE_RAISE_ARM:Inverse() * BASE_RAISE_SUB
-local RAISE_REL_MAIN_TO_HAND = BASE_RAISE_SUB:Inverse() * BASE_RAISE_MAIN
-
--- Authored strike direction and distance from portal pivot
-local AUTHORED_DIR_XZ = Vector3.new(BASE_HIT_SUB.Position.X - PORTAL_PIVOT.X, 0, BASE_HIT_SUB.Position.Z - PORTAL_PIVOT.Z)
-local AUTHORED_DIST = AUTHORED_DIR_XZ.Magnitude -- ~93.3 studs
+local PORTAL_ORIGIN = POSES.PortalShoulderPivot
+local PALM_TO_WRIST_OFFSET = BASE_HIT_HAND:VectorToWorldSpace(HAND_WRIST_LOCAL)
+local AUTHORED_DIR_XZ = Vector3.new(BASE_HIT_HAND.Position.X - PORTAL_ORIGIN.X, 0, BASE_HIT_HAND.Position.Z - PORTAL_ORIGIN.Z)
 local AUTHORED_YAW = math.atan2(-AUTHORED_DIR_XZ.X, -AUTHORED_DIR_XZ.Z)
 
--- Calculates the exact shoulder-anchored Raise and HitGround poses for ANY target point
-local function computeArticulatedPosesForTarget(circleCenter: Vector3)
-	local targetDirXZ = Vector3.new(circleCenter.X - PORTAL_PIVOT.X, 0, circleCenter.Z - PORTAL_PIVOT.Z)
-	local targetDist = targetDirXZ.Magnitude
-	local targetYaw = math.atan2(-targetDirXZ.X, -targetDirXZ.Z)
+-- Calculates the exact, mathematically rigid Raise and HitGround poses for ANY target point
+-- (Middle, Long Range, or Very Short Range) with GUARANTEED 0.000 studs wrist joint gap!
+local function computeArticulatedPosesForTarget(circleCenter: Vector3): ({ LowerArm: CFrame, SubHand: CFrame }, { LowerArm: CFrame, SubHand: CFrame })
+	-- 1. Slam HitGround Pose:
+	-- The palm lands squarely on circleCenter at ground contact level (Y = 61.17)
+	local wristTarget = Vector3.new(circleCenter.X, 61.17, circleCenter.Z) + PALM_TO_WRIST_OFFSET
+	local aimDir = (wristTarget - PORTAL_ORIGIN).Unit
+	local shoulderPos = wristTarget - (aimDir * ARM_LENGTH)
 
-	-- 1. Clamp lateral yaw swing to [-22 deg, +22 deg] so the 91-stud arm stays cleanly
-	-- inside the portal doorway and never slices sideways through the stone pillar columns.
-	local deltaYaw = math.atan2(math.sin(targetYaw - AUTHORED_YAW), math.cos(targetYaw - AUTHORED_YAW))
-	deltaYaw = math.clamp(deltaYaw, math.rad(-22), math.rad(22))
+	local rotDiff: CFrame
+	if BASE_ARM_DIR:Cross(aimDir).Magnitude < 0.0001 then
+		rotDiff = CFrame.identity
+	else
+		rotDiff = CFrame.fromAxisAngle(
+			BASE_ARM_DIR:Cross(aimDir).Unit,
+			math.acos(math.clamp(BASE_ARM_DIR:Dot(aimDir), -1, 1))
+		)
+	end
 
-	-- 2. Clamp target reach distance to natural anatomical reach [0.75, 1.15] (70 to 108 studs).
-	-- Applies a controlled telescoping offset along the strike ray so the proximal shoulder tip
-	-- ALWAYS remains rooted inside the black hole portal opening!
-	local reachFactor = math.clamp(targetDist / math.max(AUTHORED_DIST, 1), 0.75, 1.15)
-	local aimUnit = (targetDist > 0.001) and (targetDirXZ / targetDist) or Vector3.new(1, 0, 0)
-	local extensionOffset = aimUnit * ((reachFactor - 1.0) * AUTHORED_DIST * 0.5)
+	local newArmRot = rotDiff * BASE_ARM_ROT
+	local armPos = shoulderPos - (newArmRot * ARM_SHOULDER_LOCAL)
+	local armCF = CFrame.new(armPos) * newArmRot
 
-	-- 3. Shoulder-Rooted Ground Impact Pose (Rigid wrist = 0.00 studs separation anywhere)
-	local hitPivotCF = CFrame.new(PORTAL_PIVOT) * CFrame.Angles(0, deltaYaw, 0) * CFrame.new(-PORTAL_PIVOT)
-	local solvedHitArm = (hitPivotCF * BASE_HIT_ARM) + extensionOffset
-	local solvedHitSub = solvedHitArm * HIT_REL_HAND_TO_ARM
-	local solvedHitMain = solvedHitSub * HIT_REL_MAIN_TO_HAND
+	local armWristWorld = armCF:PointToWorldSpace(ARM_WRIST_LOCAL)
+	local newHandRot = rotDiff * BASE_HAND_ROT
+	local handPos = armWristWorld - (newHandRot * HAND_WRIST_LOCAL)
+	local handCF = CFrame.new(handPos) * newHandRot
 
 	local dynamicHitPose = {
-		LowerArm = solvedHitArm,
-		SubHand  = solvedHitSub,
-		MainHand = solvedHitMain,
+		LowerArm = armCF,
+		SubHand  = handCF,
 	}
 
-	-- 4. Shoulder-Rooted Raise / Apex Wind-up Pose (Rotates arm toward target from portal hinge)
-	local raisePivotCF = CFrame.new(PORTAL_PIVOT) * CFrame.Angles(0, deltaYaw * 0.60, 0) * CFrame.new(-PORTAL_PIVOT)
+	-- 2. Apex Wind-Up Raise Pose:
+	-- Smoothly rotates the arm toward the target yaw from portal shoulder hinge
+	local targetDirXZ = Vector3.new(circleCenter.X - PORTAL_ORIGIN.X, 0, circleCenter.Z - PORTAL_ORIGIN.Z)
+	local targetYaw = math.atan2(-targetDirXZ.X, -targetDirXZ.Z)
+	local deltaYaw = math.atan2(math.sin(targetYaw - AUTHORED_YAW), math.cos(targetYaw - AUTHORED_YAW))
+	deltaYaw = math.clamp(deltaYaw, math.rad(-25), math.rad(25))
+
+	local raisePivotCF = CFrame.new(PORTAL_ORIGIN) * CFrame.Angles(0, deltaYaw, 0) * CFrame.new(-PORTAL_ORIGIN)
 	local solvedRaiseArm = raisePivotCF * BASE_RAISE_ARM
-	local solvedRaiseSub = solvedRaiseArm * RAISE_REL_HAND_TO_ARM
-	local solvedRaiseMain = solvedRaiseSub * RAISE_REL_MAIN_TO_HAND
+	local raiseWristWorld = solvedRaiseArm:PointToWorldSpace(ARM_WRIST_LOCAL)
+	local solvedRaiseHand = CFrame.new(raiseWristWorld) * (solvedRaiseArm.Rotation * BASE_RAISE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
 
 	local dynamicRaisePose = {
 		LowerArm = solvedRaiseArm,
-		SubHand  = solvedRaiseSub,
-		MainHand = solvedRaiseMain,
+		SubHand  = solvedRaiseHand,
 	}
 
 	return dynamicRaisePose, dynamicHitPose
@@ -1712,18 +1619,57 @@ local DANGER_CIRCLE_RATIO = 0.80
 -- DYNAMIC WORKSPACE RESOLUTION
 -- ============================================================================
 local function resolveHazardInstances()
-	local ruinsDoor = Workspace:FindFirstChild("Ruins door") or Workspace:FindFirstChild("RuinsDoor")
+	local map = Workspace:FindFirstChild("BidToSurviveMap")
+	local ruinsDoor = (map and (map:FindFirstChild("Ruins door") or map:FindFirstChild("RuinsDoor")))
+		or Workspace:FindFirstChild("Ruins door")
+		or Workspace:FindFirstChild("RuinsDoor")
+		or Workspace:FindFirstChild("Ruins door", true)
+
 	local doorSlide: BasePart? = nil
 	local blackHole: Instance? = nil
 
 	if ruinsDoor then
-		doorSlide = ruinsDoor:FindFirstChild("doorSlide", true) :: BasePart?
+		doorSlide = (ruinsDoor:FindFirstChild("doorSlide", true) or ruinsDoor:FindFirstChild("DoorSlide", true)) :: BasePart?
 		blackHole = ruinsDoor:FindFirstChild("Blackhole", true)
 			or ruinsDoor:FindFirstChild("BlackHole", true)
 			or ruinsDoor:FindFirstChild("black hole", true)
 	end
 
-	-- Ensure Blackhole parts are strictly anchored and non-colliding
+	-- Resolve Hand model and its articulated parts
+	local handModel = (ruinsDoor and (ruinsDoor:FindFirstChild("hand", true) or ruinsDoor:FindFirstChild("Hand", true)))
+		or (map and (map:FindFirstChild("hand", true) or map:FindFirstChild("Hand", true)))
+		or Workspace:FindFirstChild("hand")
+		or Workspace:FindFirstChild("Hand")
+
+	local subHand: BasePart? = nil
+	local lowerArm: BasePart? = nil
+
+	if handModel then
+		subHand = (handModel:FindFirstChild("LeftHand") or handModel:FindFirstChild("Hand") or handModel:FindFirstChild("hand")) :: BasePart?
+		lowerArm = (handModel:FindFirstChild("LeftLowerArm") or handModel:FindFirstChild("LowerArm") or handModel:FindFirstChild("lowerarm") or handModel:FindFirstChild("lower arm")) :: BasePart?
+	end
+
+	if not subHand and ruinsDoor then
+		subHand = ruinsDoor:FindFirstChild("LeftHand", true) :: BasePart?
+	end
+	if not lowerArm and ruinsDoor then
+		lowerArm = (ruinsDoor:FindFirstChild("LeftLowerArm", true) or ruinsDoor:FindFirstChild("LowerArm", true)) :: BasePart?
+	end
+
+	-- Strip any rigid welding locks or joints that prevent CFrame tweens from animating freely
+	local animatedParts = { doorSlide, subHand, lowerArm }
+	for _, part in ipairs(animatedParts) do
+		if part and part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			for _, child in ipairs(part:GetChildren()) do
+				if child:IsA("JointInstance") or child:IsA("Constraint") then
+					child:Destroy()
+				end
+			end
+		end
+	end
+
 	if blackHole then
 		for _, d in ipairs(blackHole:GetDescendants()) do
 			if d:IsA("BasePart") then
@@ -1733,35 +1679,7 @@ local function resolveHazardInstances()
 		end
 	end
 
-	-- Resolve Hand model and its articulated parts
-	local handModel = (ruinsDoor and (ruinsDoor:FindFirstChild("hand", true) or ruinsDoor:FindFirstChild("Hand", true)))
-		or Workspace:FindFirstChild("hand")
-		or Workspace:FindFirstChild("Hand")
-
-	local subHand: BasePart? = nil
-	local lowerArm: BasePart? = nil
-	local mainHandPart: BasePart? = nil
-
-	if handModel then
-		subHand = (handModel:FindFirstChild("LeftHand") or handModel:FindFirstChild("Hand") or handModel:FindFirstChild("hand")) :: BasePart?
-		lowerArm = (handModel:FindFirstChild("LeftLowerArm") or handModel:FindFirstChild("LowerArm") or handModel:FindFirstChild("lowerarm") or handModel:FindFirstChild("lower arm")) :: BasePart?
-		
-		local candidateMain = handModel:FindFirstChild("MainHand") or handModel:FindFirstChild("UpperArm") or handModel:FindFirstChild("LeftUpperArm")
-		if candidateMain and candidateMain:IsA("BasePart") then
-			mainHandPart = candidateMain
-		elseif handModel:IsA("BasePart") and handModel ~= subHand and handModel ~= lowerArm then
-			mainHandPart = handModel
-		end
-	end
-
-	if not subHand then
-		subHand = Workspace:FindFirstChild("LeftHand", true) :: BasePart?
-	end
-	if not lowerArm then
-		lowerArm = (Workspace:FindFirstChild("LeftLowerArm", true) or Workspace:FindFirstChild("LowerArm", true)) :: BasePart?
-	end
-
-	return ruinsDoor, doorSlide, blackHole, handModel, subHand, lowerArm, mainHandPart
+	return ruinsDoor, doorSlide, blackHole, handModel, subHand, lowerArm
 end
 
 -- Helper: Computes GameplayArea Walkway Bounds, Top Surface Y, Size, Color, and Material
@@ -2055,18 +1973,26 @@ local function tweenBlackHoleScale(bhInstance: Instance?, startScale: number, en
 	end)
 end
 
-local function setHandPartsState(subHand: BasePart?, lowerArm: BasePart?, mainHandPart: BasePart?, isVisible: boolean)
-	local parts = { subHand, lowerArm, mainHandPart }
+local function setBlackHoleVisibility(bhInstance: Instance?, isVisible: boolean)
+	if not bhInstance then return end
+	for _, desc in ipairs(bhInstance:GetDescendants()) do
+		if desc:IsA("ParticleEmitter") then
+			desc.Enabled = isVisible
+		elseif desc:IsA("Light") then
+			desc.Enabled = isVisible
+		elseif desc:IsA("BasePart") and desc.Name == "Main" then
+			desc.Transparency = isVisible and 0 or 1
+		end
+	end
+end
+
+local function setHandPartsState(subHand: BasePart?, lowerArm: BasePart?, isVisible: boolean)
+	local parts = { subHand, lowerArm }
 	for _, part in ipairs(parts) do
 		if part and part:IsA("BasePart") then
 			part.Anchored = true
 			part.CanCollide = false
 			part.Transparency = isVisible and 0 or 1
-			for _, child in ipairs(part:GetChildren()) do
-				if child:IsA("Weld") or child:IsA("Motor6D") or child:IsA("RigidConstraint") then
-					child.Enabled = not isVisible
-				end
-			end
 		end
 	end
 end
@@ -2084,24 +2010,16 @@ local function setDoorBlockerVisibility(ruinsDoor: Instance?, isOpen: boolean)
 	end
 end
 
-local function tweenHandPose(subHand: BasePart?, lowerArm: BasePart?, mainHandPart: BasePart?, poseTable: any, tweenInfo: TweenInfo): Tween?
-	local t1 = mainHandPart and tweenObjectCFrame(mainHandPart, poseTable.MainHand, tweenInfo) or nil
-	local t2 = subHand and tweenObjectCFrame(subHand, poseTable.SubHand, tweenInfo) or nil
-	local t3 = lowerArm and tweenObjectCFrame(lowerArm, poseTable.LowerArm, tweenInfo) or nil
-	return t2 or t3 or t1
-end
-
 -- Kinematic Arm & Hand Driver: Pins the wrist attachment point of SubHand to LowerArm
 -- on every single Heartbeat frame, eliminating linear tween chord separation mid-swing!
 local function tweenArticulatedArm(
 	subHand: BasePart?,
 	lowerArm: BasePart?,
-	mainHandPart: BasePart?,
-	targetPose: any,
+	targetPose: { LowerArm: CFrame, SubHand: CFrame },
 	tweenInfo: TweenInfo
 ): Tween?
 	if not lowerArm or not subHand then
-		return tweenHandPose(subHand, lowerArm, mainHandPart, targetPose, tweenInfo)
+		return nil
 	end
 
 	local startArmCF = lowerArm.CFrame
@@ -2116,19 +2034,19 @@ local function tweenArticulatedArm(
 	if not armTween then return nil end
 
 	local startTime = os.clock()
-	local duration = tweenInfo.Time
+	local duration = math.max(tweenInfo.Time, 0.001)
 	local style = tweenInfo.EasingStyle
 	local dir = tweenInfo.EasingDirection
 
 	local conn: RBXScriptConnection? = nil
 	conn = RunService.Heartbeat:Connect(function()
 		if not lowerArm or not lowerArm.Parent or not subHand or not subHand.Parent then
-			if conn then conn:Disconnect() end
+			if conn then conn:Disconnect() conn = nil end
 			return
 		end
 
 		local elapsed = os.clock() - startTime
-		local progress = math.clamp(elapsed / math.max(duration, 0.001), 0, 1)
+		local progress = math.clamp(elapsed / duration, 0, 1)
 		local alpha = TweenService:GetValue(progress, style, dir)
 
 		local curArmCF = lowerArm.CFrame
@@ -2137,9 +2055,6 @@ local function tweenArticulatedArm(
 		local curSubCF = CFrame.new(armWristWorld) * (curArmCF.Rotation * curRelRot) * CFrame.new(-HAND_WRIST_LOCAL)
 
 		subHand.CFrame = curSubCF
-		if mainHandPart and targetPose.MainHand then
-			mainHandPart.CFrame = curSubCF * HIT_REL_MAIN_TO_HAND
-		end
 	end)
 
 	armTween.Completed:Once(function()
@@ -2147,8 +2062,8 @@ local function tweenArticulatedArm(
 			conn:Disconnect()
 			conn = nil
 		end
+		if lowerArm then lowerArm.CFrame = targetPose.LowerArm end
 		if subHand then subHand.CFrame = targetPose.SubHand end
-		if mainHandPart and targetPose.MainHand then mainHandPart.CFrame = targetPose.MainHand end
 	end)
 
 	return armTween
@@ -2171,7 +2086,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 	isSequenceActive = true
 
 	local success, err = pcall(function()
-		local ruinsDoor, doorSlide, blackHole, handModel, subHand, lowerArm, mainHandPart = resolveHazardInstances()
+		local ruinsDoor, doorSlide, blackHole, handModel, subHand, lowerArm = resolveHazardInstances()
 
 		print("[RuinsDoorHandManager] Starting 5-Stage Cinematic Sequence...")
 
@@ -2212,6 +2127,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 			TweenInfo.new(doorOpenTime, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
 		)
 
+		setBlackHoleVisibility(blackHole, true)
 		setBlackholeParticlesEnabled(blackHole, true)
 		tweenBlackHoleScale(blackHole, 0.001, POSES.BlackHoleTargetScale, doorOpenTime, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
@@ -2220,31 +2136,32 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		-- ------------------------------------------------------------------------
 		-- STAGE 2: HAND EMERGES OUT OF PORTAL (0.85s)
 		-- ------------------------------------------------------------------------
-		setHandPartsState(subHand, lowerArm, mainHandPart, true)
+		setHandPartsState(subHand, lowerArm, true)
 
-		if subHand then subHand.CFrame = POSES.Emerge.SubHand * CFrame.new(0, 0, 30) end
 		if lowerArm then lowerArm.CFrame = POSES.Emerge.LowerArm * CFrame.new(0, 0, 30) end
+		if subHand and lowerArm then
+			local w = lowerArm.CFrame:PointToWorldSpace(ARM_WRIST_LOCAL)
+			subHand.CFrame = CFrame.new(w) * (lowerArm.CFrame.Rotation * BASE_EMERGE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
+		end
 
-		local emergeTween = tweenHandPose(
+		local emergeTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
-			mainHandPart,
 			POSES.Emerge,
 			TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 		)
 		if emergeTween then emergeTween.Completed:Wait() else task.wait(0.85) end
 
 		-- ------------------------------------------------------------------------
-		-- STAGE 3: HAND RAISE / APEX WIND-UP - HARD LOCK 80% RED CIRCLE
+		-- STAGE 3: HAND RAISE / APEX WIND-UP - HARD LOCK 80% RED CIRCLE (0.70s + 0.14s)
 		-- ------------------------------------------------------------------------
-		-- Recalculate target position right as hand raises so target cannot pre-run
 		local circleCenter, circleRadius, currentFloorColor, currentFloorMat, lockedTarget =
 			RuinsDoorHandManager.CalculateTargetDangerCircle(customPlayerData)
 
-		-- Razor-Thin Bottleneck formula: (circleRadius * 0.72) / SPRINT_SPEED
-		local lockedWarningTime = math.clamp((circleRadius * 0.72) / 21, 0.90, 1.35)
 		local slamTime = 0.22
-		local raiseDuration = math.max(0.60, lockedWarningTime - slamTime - 0.12)
+		local raiseDuration = 0.70
+		local apexHold = 0.14
+		local lockedWarningTime = raiseDuration + apexHold + slamTime
 
 		-- Fire 80% Red Warning Circle to all clients NOW!
 		if RunService:IsRunning() and RunService:IsServer() then
@@ -2256,14 +2173,13 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		local raiseTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
-			mainHandPart,
 			dynamicRaisePose,
 			TweenInfo.new(raiseDuration, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 		)
 		if raiseTween then raiseTween.Completed:Wait() else task.wait(raiseDuration) end
 
 		-- Dramatic apex hang-time before plunge
-		task.wait(0.12)
+		task.wait(apexHold)
 
 		-- ------------------------------------------------------------------------
 		-- STAGE 4: GROUND SLAM & SYNCHRONIZED PLAYER DAMAGE (0.22s)
@@ -2271,7 +2187,6 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		local slamTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
-			mainHandPart,
 			dynamicHitPose,
 			TweenInfo.new(slamTime, Enum.EasingStyle.Exponential, Enum.EasingDirection.In)
 		)
@@ -2361,13 +2276,12 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		local retractTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
-			mainHandPart,
 			POSES.Emerge,
 			TweenInfo.new(0.65, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
 		)
 		if retractTween then retractTween.Completed:Wait() else task.wait(0.65) end
 
-		setHandPartsState(subHand, lowerArm, mainHandPart, false)
+		setHandPartsState(subHand, lowerArm, false)
 
 		if RunService:IsRunning() and RunService:IsServer() then
 			PortalRemote:FireAllClients(false, 1.0, 0.001)
@@ -2381,6 +2295,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		)
 		if closeTween then closeTween.Completed:Wait() else task.wait(1.0) end
 
+		setBlackHoleVisibility(blackHole, false)
 		setBlackholeParticlesEnabled(blackHole, false)
 
 		if setDoorPartsVisibilityCallback then
@@ -2540,6 +2455,63 @@ local function buildSpawnBoxFromFences()
 end
 
 buildSpawnBoxFromFences()
+
+-- 3.5 Ensure Thick Mud Foundation Exists Beneath Both Grass Walkways
+local function ensureMudFoundations()
+	local map = Workspace:FindFirstChild("BidToSurviveMap")
+	if not map then return end
+
+	-- 1. Spawn Area Mud Foundation (20 studs thick)
+	local spawnArea = map:FindFirstChild("SpawnArea")
+	local spawnGround = spawnArea and spawnArea:FindFirstChild("Ground")
+	local spawnWalkway = spawnGround and spawnGround:FindFirstChild("Walkway")
+	if spawnWalkway and spawnGround and not spawnGround:FindFirstChild("MudFoundation") then
+		local height = 20
+		local topY = spawnWalkway.Position.Y - (spawnWalkway.Size.Y * 0.5)
+		local centerY = topY - (height * 0.5)
+
+		local mud = Instance.new("Part")
+		mud.Name = "MudFoundation"
+		mud.Size = Vector3.new(spawnWalkway.Size.X, height, spawnWalkway.Size.Z)
+		mud.Position = Vector3.new(spawnWalkway.Position.X, centerY, spawnWalkway.Position.Z)
+		mud.Material = Enum.Material.Mud
+		mud.Color = Color3.fromRGB(86, 58, 38)
+		mud.Anchored = true
+		mud.CanCollide = true
+		mud.CanTouch = true
+		mud.CanQuery = true
+		mud.TopSurface = Enum.SurfaceType.Smooth
+		mud.BottomSurface = Enum.SurfaceType.Smooth
+		mud.Parent = spawnGround
+		print("[SpawnAndAFKManager] ✅ Created 20-stud thick Mud Foundation under Spawn Area.")
+	end
+
+	-- 2. Gameplay Area Mud Foundation (24 studs thick)
+	local gameArea = map:FindFirstChild("GameplayArea")
+	local gameWalkway = gameArea and gameArea:FindFirstChild("Walkway")
+	if gameWalkway and gameArea and not gameArea:FindFirstChild("MudFoundation") then
+		local height = 24
+		local topY = gameWalkway.Position.Y - (gameWalkway.Size.Y * 0.5)
+		local centerY = topY - (height * 0.5)
+
+		local mud = Instance.new("Part")
+		mud.Name = "MudFoundation"
+		mud.Size = Vector3.new(gameWalkway.Size.X, height, gameWalkway.Size.Z)
+		mud.Position = Vector3.new(gameWalkway.Position.X, centerY, gameWalkway.Position.Z)
+		mud.Material = Enum.Material.Mud
+		mud.Color = Color3.fromRGB(86, 58, 38)
+		mud.Anchored = true
+		mud.CanCollide = true
+		mud.CanTouch = true
+		mud.CanQuery = true
+		mud.TopSurface = Enum.SurfaceType.Smooth
+		mud.BottomSurface = Enum.SurfaceType.Smooth
+		mud.Parent = gameArea
+		print("[SpawnAndAFKManager] ✅ Created 24-stud thick Mud Foundation under Gameplay Area.")
+	end
+end
+
+ensureMudFoundations()
 
 -- 4. Unified AFK Teleport & Attribute Handler
 local function handleAFKToggle(player: Player, isAFK: boolean?)
@@ -2985,7 +2957,7 @@ local function SetHammerVisual(rarityData)
     damageTitle.Text = string.format("DEALS %d%% HP DAMAGE", rarityData.DamagePercent or 30)
 end
 
-local function PlayHammerRoulette(targetRarity, totalDuration)
+local function PlayHammerRoulette(targetRarity, totalDuration, spinnerReel)
     if IsRoulettePlaying or (not IsActiveInRound()) then return end
     IsRoulettePlaying = true
     local myToken = SessionToken
@@ -2998,14 +2970,27 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
     rarityTitle.TextTransparency = 0
     damageTitle.TextTransparency = 0
     
-    local rarities = GameConfig.GetRarityList()
     local delays = {
         0.10, 0.10, 0.11, 0.11, 0.12, 0.13, 0.14, 0.16,
         0.18, 0.20, 0.23, 0.27, 0.31, 0.36, 0.42, 0.50,
         0.60, 0.72, 0.85
     }
     
-    local currentIdx = 1
+    -- Use server-provided anti-repeat randomized reel or generate local fallback
+    local reel = spinnerReel
+    if not reel or #reel < #delays then
+        if GameConfig.BuildRandomSpinnerStrip then
+            reel = GameConfig.BuildRandomSpinnerStrip(CurrentRound or 1, #delays, #delays, targetRarity.Name)
+        else
+            reel = {}
+            local order = GameConfig.RarityOrder or {"Common", "Uncommon", "Rare", "Legendary", "Mythical"}
+            for i = 1, #delays do
+                reel[i] = order[((i - 1) % #order) + 1]
+            end
+            reel[#delays] = targetRarity.Name
+        end
+    end
+    
     for i, delay in ipairs(delays) do
         if (not IsActiveInRound()) or myToken ~= SessionToken then
             rouletteContainer.Visible = false
@@ -3013,8 +2998,8 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
             return
         end
         
-        currentIdx = (currentIdx % #rarities) + 1
-        local r = rarities[currentIdx]
+        local stepRarityName = reel[i] or targetRarity.Name
+        local r = GameConfig.HammerRarities[stepRarityName] or targetRarity
         SetHammerVisual(r)
         
         local tiltAngle = (i % 2 == 0) and 7 or -7
@@ -3228,8 +3213,9 @@ StateChanged.OnClientEvent:Connect(function(data)
         voteModal.Visible = false
         
         if rarity then
+            local spinnerReel = (data.Extra and data.Extra.SpinnerReel) or data.SpinnerReel
             task.spawn(function()
-                PlayHammerRoulette(rarity, data.RouletteDuration or 6.0)
+                PlayHammerRoulette(rarity, data.RouletteDuration or 6.0, spinnerReel)
             end)
         end
         
@@ -3707,11 +3693,30 @@ end)
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="15">
+    <Item class="StarterCharacterScripts" referent="15">
+      <Properties>
+        <string name="Name">StarterCharacterScripts</string>
+      </Properties>
+      <Item class="Script" referent="16">
+        <Properties>
+          <string name="Name">Health</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[--!strict
+-- StarterCharacterScripts/Health.server.luau
+-- Disables Roblox's default passive health regeneration.
+-- Health in "Bid to Survive" only resets to 100 at the start of a brand-new match (CurrentRound == 0).
+-- Damage sustained in Round 1 carries over into subsequent rounds without passive healing.
+
+-- Do nothing: deliberately omit any Humanoid.Health regeneration loop.
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+    <Item class="StarterPlayerScripts" referent="17">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="16">
+      <Item class="LocalScript" referent="18">
         <Properties>
           <string name="Name">GorillaImpactClient</string>
           <string name="Source"><![CDATA[--!strict
@@ -4074,7 +4079,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="17">
+      <Item class="LocalScript" referent="19">
         <Properties>
           <string name="Name">MovementDiveAndHUDClient</string>
           <string name="Source"><![CDATA[--!strict
@@ -4092,6 +4097,8 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ContentProvider = game:GetService("ContentProvider")
+local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
@@ -4102,6 +4109,14 @@ local ResetHUDRemote: RemoteEvent? = (Network and Network:FindFirstChild("ResetH
 
 local StatsUpdated: RemoteEvent? = (Network and Network:FindFirstChild("StatsUpdated") :: RemoteEvent?)
 	or (ReplicatedStorage:FindFirstChild("StatsUpdated") :: RemoteEvent?)
+
+local ClientLoadReadyEvent: RemoteEvent? = (Network and Network:FindFirstChild("ClientLoadReadyEvent") :: RemoteEvent?)
+	or (ReplicatedStorage:FindFirstChild("ClientLoadReadyEvent") :: RemoteEvent?)
+if not ClientLoadReadyEvent then
+	ClientLoadReadyEvent = Instance.new("RemoteEvent")
+	ClientLoadReadyEvent.Name = "ClientLoadReadyEvent"
+	ClientLoadReadyEvent.Parent = Network or ReplicatedStorage
+end
 
 -- ============================================================================
 -- 1. ANIMATION IDs & MOVEMENT TUNING
@@ -4122,8 +4137,9 @@ local currentDiveAnimId = R6_DIVE_ANIM_ID
 
 local BASE_WALK_SPEED    = 14
 local SPRINT_WALK_SPEED  = 21
-local DIVE_FORWARD_SPEED = 36 -- Studs/sec forward impulse during dive
+local DIVE_FORWARD_SPEED = 32 -- Slightly decreased forward dive impulse for tighter, more athletic control
 local DIVE_DURATION      = 0.68 -- Fallback duration if track length hasn't loaded
+local DIVE_LANDING_DELAY = 0.22 -- Recovery delay on ground before returning to normal standing
 
 -- Energy Settings (White Bar)
 local MAX_ENERGY        = 100
@@ -4328,7 +4344,7 @@ local function syncMovementTracks()
 		-- Suppress default Animate movement tracks so custom sprint animation displays without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= runTrack and tr ~= diveTrack and tr.Priority == Enum.AnimationPriority.Movement then
+				if tr ~= runTrack and tr ~= diveTrack and tr ~= walkTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
 					tr:Stop(0.1)
 				end
 			end
@@ -4339,7 +4355,7 @@ local function syncMovementTracks()
 		-- Suppress default Animate movement tracks so custom walk animation displays without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= walkTrack and tr ~= diveTrack and tr.Priority == Enum.AnimationPriority.Movement then
+				if tr ~= walkTrack and tr ~= diveTrack and tr ~= runTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
 					tr:Stop(0.1)
 				end
 			end
@@ -4354,6 +4370,15 @@ local function performRunningDive()
 	if isDiving or not activeChar or not activeHum or not activeHRP then return end
 	if activeHum.Health <= 0 or currentEnergy < 10 then return end
 
+	-- Lock dive direction along the player's current movement / look direction
+	local moveDir = activeHum.MoveDirection
+	local flatDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+	if flatDir.Magnitude < 0.1 then
+		local look = activeHRP.CFrame.LookVector
+		flatDir = Vector3.new(look.X, 0, look.Z)
+	end
+	flatDir = flatDir.Unit
+
 	isDiving = true
 	currentEnergy = math.max(0, currentEnergy - DIVE_ENERGY_COST)
 	print(string.format("[Movement][Dive] 🏊 Spacebar Dive initiated! (Direction: %s, Energy before: %d%%, Cost: %d%%)", tostring(flatDir), math.floor(currentEnergy + DIVE_ENERGY_COST), DIVE_ENERGY_COST))
@@ -4364,24 +4389,45 @@ local function performRunningDive()
 	if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.1) end
 	if runTrack and runTrack.IsPlaying then runTrack:Stop(0.1) end
 
-	-- Lock dive direction along the player's current movement / look direction
-	local moveDir = activeHum.MoveDirection
-	local flatDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-	if flatDir.Magnitude < 0.1 then
-		local look = activeHRP.CFrame.LookVector
-		flatDir = Vector3.new(look.X, 0, look.Z)
-	end
-	flatDir = flatDir.Unit
-
 	-- Face character cleanly in the dive direction
 	activeHRP.CFrame = CFrame.lookAt(activeHRP.Position, activeHRP.Position + flatDir)
 
+	-- Motion Design: Aerodynamic pure white motion trail during dive roll
+	local trailAtt0 = Instance.new("Attachment")
+	trailAtt0.Name = "DiveTrailAtt0"
+	trailAtt0.Position = Vector3.new(0, 1.1, 0)
+	trailAtt0.Parent = activeHRP
+
+	local trailAtt1 = Instance.new("Attachment")
+	trailAtt1.Name = "DiveTrailAtt1"
+	trailAtt1.Position = Vector3.new(0, -1.1, 0)
+	trailAtt1.Parent = activeHRP
+
+	local diveTrail = Instance.new("Trail")
+	diveTrail.Name = "DiveMotionTrail"
+	diveTrail.Attachment0 = trailAtt0
+	diveTrail.Attachment1 = trailAtt1
+	diveTrail.FaceCamera = true
+	diveTrail.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+	diveTrail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(1, 1.0),
+	})
+	diveTrail.Lifetime = 0.25
+	diveTrail.LightEmission = 0.85
+	diveTrail.LightInfluence = 0.1
+	diveTrail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.0),
+		NumberSequenceKeypoint.new(1, 0.2),
+	})
+	diveTrail.Parent = activeHRP
+
 	local visualTorso = activeChar:FindFirstChild("LowerTorso") or activeChar:FindFirstChild("Torso")
-	local diveDuration = DIVE_DURATION
+	local diveDuration = 0.68 -- Dynamic fallback if metadata hasn't loaded yet
 
 	if diveTrack then
 		diveTrack:Play(0.08, 1, 1.0)
-		if diveTrack.Length > 0.1 then
+		if diveTrack.Length and diveTrack.Length > 0.05 then
 			diveDuration = diveTrack.Length
 		end
 		print(string.format("[Movement][Dive] 🎬 DiveTrack playing (Length: %.2fs, Priority: %s)", diveDuration, diveTrack.Priority.Name))
@@ -4391,58 +4437,68 @@ local function performRunningDive()
 	rayParams.FilterDescendantsInstances = { activeChar }
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-	-- Glide character forward along a wall-safe raycast during the dive
+	local torso = activeChar:FindFirstChild("Torso")
+	local head = activeChar:FindFirstChild("Head")
+
+	-- 1. CRITICAL: Disable Torso and Head CanCollide during roll so rotating body parts
+	-- NEVER collide into or penetrate the 1-stud thick floor parts!
+	if torso and torso:IsA("BasePart") then torso.CanCollide = false end
+	if head and head:IsA("BasePart") then head.CanCollide = false end
+
+	-- 2. Apply horizontal physics impulse with MaxForce.Y = 0
+	-- Vertical axis is handled 100% by Roblox's native floor suspension, making it physically impossible to fall through the floor!
+	local bv = Instance.new("BodyVelocity")
+	bv.Name = "DiveImpulse"
+	bv.MaxForce = Vector3.new(150000, 0, 150000)
+	bv.Velocity = flatDir * DIVE_FORWARD_SPEED
+	bv.Parent = activeHRP
+
 	local startTime = os.clock()
-	local glideConn: RBXScriptConnection? = nil
-	glideConn = RunService.Heartbeat:Connect(function(dt)
-		if not activeHRP or not activeHum or activeHum.Health <= 0 then
-			if glideConn then glideConn:Disconnect() end
-			return
-		end
+	while (os.clock() - startTime) < diveDuration do
+		task.wait(0.03)
+		if not activeHRP or not activeHum or activeHum.Health <= 0 then break end
 
 		local elapsed = os.clock() - startTime
 		local alpha = math.clamp(elapsed / diveDuration, 0, 1)
-		-- Fast burst at start of dive, smoothly decelerating at landing
-		local speedNow = DIVE_FORWARD_SPEED * (1 - (alpha * 0.55))
-		local stepDist = speedNow * dt
+		local curSpeed = DIVE_FORWARD_SPEED * (1 - (alpha * 0.55))
 
-		-- Wall check so the player never dives through fences or walls
-		local wallHit = Workspace:Raycast(activeHRP.Position, flatDir * (stepDist + 2.2), rayParams)
-		if not wallHit then
-			activeHRP.CFrame = activeHRP.CFrame + (flatDir * stepDist)
-		end
-	end)
-
-	-- Wait until the exact end frame of the Dive animation
-	task.wait(math.max(0.1, diveDuration - 0.04))
-	if glideConn then glideConn:Disconnect() end
-
-	-- CRITICAL FIX: If the Dive animation (137603926461078) shifted the visual Torso bone forward
-	-- relative to HumanoidRootPart, capture that extra bone offset BEFORE stopping the track!
-	if activeHRP and visualTorso and visualTorso:IsA("BasePart") then
-		local boneForwardOffset = visualTorso.Position - activeHRP.Position
-		local flatBoneOffset = Vector3.new(boneForwardOffset.X, 0, boneForwardOffset.Z)
-
-		if flatBoneOffset.Magnitude > 0.5 then
-			local safeCheck = Workspace:Raycast(activeHRP.Position, flatBoneOffset, rayParams)
-			local finalXZ = safeCheck and (safeCheck.Position - flatBoneOffset.Unit * 1.5) or (activeHRP.Position + flatBoneOffset)
-
-			-- Ground snap raycast so character stands cleanly on the floor at the result area
-			local groundHit = Workspace:Raycast(
-				Vector3.new(finalXZ.X, activeHRP.Position.Y + 4, finalXZ.Z),
-				Vector3.new(0, -15, 0),
-				rayParams
-			)
-			local finalY = groundHit and (groundHit.Position.Y + activeHum.HipHeight + (activeHRP.Size.Y * 0.5)) or activeHRP.Position.Y
-			activeHRP.CFrame = CFrame.lookAt(Vector3.new(finalXZ.X, finalY, finalXZ.Z), Vector3.new(finalXZ.X, finalY, finalXZ.Z) + flatDir)
+		-- Edge & cliff protection: verify solid ground still exists 3.5 studs ahead
+		local checkPos = activeHRP.Position + (flatDir * 3.5)
+		local floorAhead = Workspace:Raycast(checkPos + Vector3.new(0, 3, 0), Vector3.new(0, -8, 0), rayParams)
+		if floorAhead then
+			bv.Velocity = flatDir * curSpeed
+		else
+			-- Edge detected! Cut velocity so character stays safely on the platform
+			bv.Velocity = Vector3.zero
 		end
 	end
 
-	print(string.format("[Movement][Dive] 🎯 Dive complete and landed at %s", tostring(activeHRP.Position)))
+	-- Clean up impulse and restore body collisions
+	if bv and bv.Parent then
+		bv:Destroy()
+	end
+	if torso and torso:IsA("BasePart") then torso.CanCollide = true end
+	if head and head:IsA("BasePart") then head.CanCollide = true end
 
-	-- Stop Dive with 0 fade time so limbs don't interpolate backward!
+	print(string.format("[Movement][Dive] 🎯 Dive complete and safely landed on floor at %s", tostring(activeHRP.Position)))
+
+	-- Fade and cleanly clean up motion trail
+	diveTrail.Enabled = false
+	Debris:AddItem(diveTrail, 0.35)
+	Debris:AddItem(trailAtt0, 0.35)
+	Debris:AddItem(trailAtt1, 0.35)
+
+	-- Ground recovery delay: damp speed briefly so character absorbs the landing before springing back up
+	if activeHum and activeHum.Health > 0 then
+		activeHum.WalkSpeed = 6 -- Momentarily dampened crawl/recovery speed
+	end
+
+	-- Slight delay on the ground before returning to normal standing posture
+	task.wait(DIVE_LANDING_DELAY)
+
+	-- Smoothly stop Dive track as player recovers into standing
 	if diveTrack and diveTrack.IsPlaying then
-		diveTrack:Stop(0)
+		diveTrack:Stop(0.12)
 	end
 
 	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
@@ -4453,6 +4509,14 @@ end
 -- ============================================================================
 -- 5. CHARACTER SETUP & GAME-2 HP RESET FIX
 -- ============================================================================
+local function bindCameraToHumanoid(hum: Humanoid)
+	local cam = Workspace.CurrentCamera
+	if not cam then return end
+	cam.CameraType = Enum.CameraType.Custom
+	cam.CameraSubject = hum
+	print(string.format("[Movement][Camera] 🎥 CameraSubject bound to %s (Parent: %s)", hum.Name, hum.Parent and hum.Parent.Name or "nil"))
+end
+
 local function setupCharacter(character: Model)
 	activeChar = character
 	activeHum = character:WaitForChild("Humanoid") :: Humanoid
@@ -4461,6 +4525,22 @@ local function setupCharacter(character: Model)
 	isDiving = false
 	currentEnergy = MAX_ENERGY
 	lastMovementState = "None"
+
+	-- 0. CAMERA TRACKING: Guarantee camera follows the active character seamlessly
+	bindCameraToHumanoid(activeHum)
+
+	task.spawn(function()
+		for _ = 1, 15 do
+			local cam = Workspace.CurrentCamera
+			if cam and activeHum and activeHum.Parent then
+				if cam.CameraSubject ~= activeHum or cam.CameraType ~= Enum.CameraType.Custom then
+					cam.CameraType = Enum.CameraType.Custom
+					cam.CameraSubject = activeHum
+				end
+			end
+			task.wait(0.08)
+		end
+	end)
 
 	local rigType = activeHum.RigType
 	print(string.format("[Movement][Init] 👤 Setting up character: %s | RigType: %s", character.Name, rigType.Name))
@@ -4477,47 +4557,82 @@ local function setupCharacter(character: Model)
 		warn(string.format("[Movement][Init] ⚠️ R15 Avatar detected! The custom animations (90697464892050, 125757170550820, 137603926461078) were authored for R6 (Torso, Left/Right Arm, Left/Right Leg) and cannot articulate R15 bones. Loaded R15-compatible animations:\n  • Walk: %s\n  • Run: %s\n  • Dive: %s\n  💡 TIP: To use your custom animations, keep StarterPlayer.StarterCharacter as R6 or set Game Settings -> Avatar -> R6.", currentWalkAnimId, currentRunAnimId, currentDiveAnimId))
 	end
 
-	-- Replace default Animate walk/run IDs AND load explicit Animator tracks
+	-- 1. Disable default Roblox 'Animate' script's walk/run interference on R6
 	local animateScript = character:WaitForChild("Animate", 3)
-	if animateScript then
-		local w = animateScript:FindFirstChild("walk")
-		if w then
-			for _, child in ipairs(w:GetChildren()) do
-				if child:IsA("Animation") then child.AnimationId = currentWalkAnimId end
-			end
-		end
-		local r = animateScript:FindFirstChild("run")
-		if r then
-			for _, child in ipairs(r:GetChildren()) do
-				if child:IsA("Animation") then child.AnimationId = currentRunAnimId end
+	if animateScript and animateScript:IsA("LocalScript") then
+		for _, folderName in ipairs({ "walk", "run" }) do
+			local folder = animateScript:FindFirstChild(folderName)
+			if folder then
+				for _, anim in ipairs(folder:GetChildren()) do
+					if anim:IsA("Animation") then
+						anim.AnimationId = (folderName == "walk") and currentWalkAnimId or currentRunAnimId
+					end
+				end
 			end
 		end
 	end
 
 	local animator = activeHum:WaitForChild("Animator", 5) :: Animator
 	if animator then
+		-- 2. Stop any lingering default movement tracks on the Animator
+		for _, playingTrack in ipairs(animator:GetPlayingAnimationTracks()) do
+			if playingTrack.Priority == Enum.AnimationPriority.Movement or playingTrack.Priority == Enum.AnimationPriority.Core then
+				playingTrack:Stop(0)
+			end
+		end
+
+		-- 3. Create & Preload Custom Animations so Length is NEVER 0.00s
 		local walkAnim = Instance.new("Animation")
 		walkAnim.AnimationId = currentWalkAnimId
-		walkTrack = animator:LoadAnimation(walkAnim)
-		walkTrack.Priority = Enum.AnimationPriority.Action
-		walkTrack.Looped = true
 
 		local runAnim = Instance.new("Animation")
 		runAnim.AnimationId = currentRunAnimId
+
+		local diveAnim = Instance.new("Animation")
+		diveAnim.AnimationId = currentDiveAnimId
+
+		pcall(function()
+			ContentProvider:PreloadAsync({ walkAnim, runAnim, diveAnim })
+		end)
+
+		walkTrack = animator:LoadAnimation(walkAnim)
+		walkTrack.Priority = Enum.AnimationPriority.Movement
+		walkTrack.Looped = true
+
 		runTrack = animator:LoadAnimation(runAnim)
 		runTrack.Priority = Enum.AnimationPriority.Action
 		runTrack.Looped = true
 
-		local diveAnim = Instance.new("Animation")
-		diveAnim.AnimationId = currentDiveAnimId
 		diveTrack = animator:LoadAnimation(diveAnim)
 		diveTrack.Priority = Enum.AnimationPriority.Action4
 		diveTrack.Looped = false
+
+		-- Yield in loop until all 3 track lengths are strictly > 0s (up to 5s timeout)
+		local loadStart = os.clock()
+		while (walkTrack.Length <= 0 or runTrack.Length <= 0 or diveTrack.Length <= 0) and (os.clock() - loadStart < 5.0) do
+			task.wait(0.05)
+		end
 
 		print(string.format("[Movement][Init] 🎬 Tracks loaded on Animator:\n  • WalkTrack: Length=%.2fs, Priority=%s, Looped=%s\n  • RunTrack:  Length=%.2fs, Priority=%s, Looped=%s\n  • DiveTrack: Length=%.2fs, Priority=%s, Looped=%s",
 			walkTrack and walkTrack.Length or 0, walkTrack and walkTrack.Priority.Name or "nil", tostring(walkTrack and walkTrack.Looped),
 			runTrack and runTrack.Length or 0, runTrack and runTrack.Priority.Name or "nil", tostring(runTrack and runTrack.Looped),
 			diveTrack and diveTrack.Length or 0, diveTrack and diveTrack.Priority.Name or "nil", tostring(diveTrack and diveTrack.Looped)))
+
+		-- Step 2 Completion Check: Verify Workspace Map and Ruins Door are ready on client
+		task.spawn(function()
+			local map = Workspace:WaitForChild("BidToSurviveMap", 8)
+			if map then
+				map:WaitForChild("Ruins door", 8)
+				map:WaitForChild("GameplayArea", 8)
+			end
+
+			print(string.format("[BOOT HIERARCHY] 🎬 Step 2: Animations verified (Walk: %.2fs, Run: %.2fs, Dive: %.2fs) & map assets ready. Firing ClientLoadReadyEvent.",
+				walkTrack.Length, runTrack.Length, diveTrack.Length))
+
+			if ClientLoadReadyEvent then
+				ClientLoadReadyEvent:FireServer()
+			end
+		end)
 	end
 
 	-- Re-bind HP listener on EVERY new character/game so Game 2 never stays stuck at 0 HP!
@@ -4538,6 +4653,26 @@ if player.Character then
 	task.spawn(setupCharacter, player.Character)
 end
 player.CharacterAdded:Connect(setupCharacter)
+
+-- Monitor camera to prevent camera detachment when characters are converted or respawned
+Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	camera = Workspace.CurrentCamera
+	if activeHum and activeHum.Parent then
+		bindCameraToHumanoid(activeHum)
+	end
+end)
+
+task.spawn(function()
+	while true do
+		task.wait(0.25)
+		local currentCam = Workspace.CurrentCamera
+		if currentCam and activeHum and activeHum.Parent then
+			if currentCam.CameraSubject ~= activeHum then
+				bindCameraToHumanoid(activeHum)
+			end
+		end
+	end
+end)
 
 local function handleHUDReset()
 	currentEnergy = MAX_ENERGY
@@ -4619,7 +4754,7 @@ print("[MovementDiveAndHUDClient] Initialized: Walk (90697464892050), Run (12575
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="18">
+      <Item class="LocalScript" referent="20">
         <Properties>
           <string name="Name">RuinsImpactClient</string>
           <string name="Source"><![CDATA[--!strict
@@ -5056,13 +5191,13 @@ print("[RuinsImpactClient] Loaded and listening for RuinsHandImpactEvent, RuinsP
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="19">
+  <Item class="Workspace" referent="21">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Part" referent="20">
+    <Item class="Part" referent="22">
       <Properties>
         <string name="Name">Baseplate</string>
         <bool name="Anchored">true</bool>

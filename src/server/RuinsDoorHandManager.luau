@@ -57,107 +57,114 @@ local function toStudioCFrame(pos: Vector3, rotDeg: Vector3): CFrame
 end
 
 -- ============================================================================
--- EXACT STUDIO COORDINATES & ORIENTATIONS (YXZ DEGREES)
+-- EXACT STUDIO COORDINATES & ANATOMICAL WRIST JOINTS
 -- ============================================================================
+-- Visual anatomical wrist joint locations:
+-- LowerArm: size (17.52, 91.09, 24.47), shoulder at +Y, wrist socket at -Y
+-- SubHand:  size (25.07, 55.82, 32.11), wrist socket at +Y, palm/fingers at -Y
+local ARM_SHOULDER_LOCAL = Vector3.new(2.36035, 44.54465, 0)
+local ARM_WRIST_LOCAL    = Vector3.new(-2.36035, -44.54465, 0)
+local HAND_WRIST_LOCAL   = Vector3.new(-7.92460, 27.82055, 1.308)
+
+local BASE_HIT_ARM = toStudioCFrame(Vector3.new(-220.23, 86.704, -23.81), Vector3.new(18.125, -166.564, -62.174))
+local BASE_HIT_HAND = toStudioCFrame(Vector3.new(-151.714, 61.17, -30.17), Vector3.new(18.125, -166.564, -88.626))
+
+local BASE_RAISE_ARM = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682))
+local BASE_RAISE_REL_ROT = BASE_RAISE_ARM.Rotation:Inverse() * toStudioCFrame(Vector3.new(-193.164, 191.594, -64.161), Vector3.new(18.125, -166.564, -166.133)).Rotation
+local BASE_RAISE_WRIST = BASE_RAISE_ARM:PointToWorldSpace(ARM_WRIST_LOCAL)
+local BASE_RAISE_HAND = CFrame.new(BASE_RAISE_WRIST) * (BASE_RAISE_ARM.Rotation * BASE_RAISE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
+
+local BASE_EMERGE_ARM = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682))
+local BASE_EMERGE_REL_ROT = CFrame.Angles(0, 0, math.rad(63.549))
+local BASE_EMERGE_WRIST = BASE_EMERGE_ARM:PointToWorldSpace(ARM_WRIST_LOCAL)
+local BASE_EMERGE_HAND = CFrame.new(BASE_EMERGE_WRIST) * (BASE_EMERGE_ARM.Rotation * BASE_EMERGE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
+
 local POSES = {
 	DoorOrigin = toStudioCFrame(Vector3.new(-258.076, 102.018, -30.455), Vector3.new(-90, -90, 0)),
 	DoorOpen   = toStudioCFrame(Vector3.new(-258.076, 102.018, -77.145), Vector3.new(-90, -90, 0)),
 
 	BlackHoleTargetScale = 3.804,
-
-	-- Shoulder / Portal pivot inside the Ruins Door
-	PortalShoulderPivot = Vector3.new(-245.0, 102.018, -30.455),
+	PortalShoulderPivot  = Vector3.new(-258.0, 104.0, -25.0),
 
 	-- 1) Emerge Out of Portal
 	Emerge = {
-		MainHand = toStudioCFrame(Vector3.new(-198.174, 91.394, -29.243), Vector3.new(18.125, -166.564, -31.134)),
-		SubHand  = toStudioCFrame(Vector3.new(-179.856, 154.081, -54.716), Vector3.new(18.125, -166.564, -76.133)),
-		LowerArm = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682)),
+		SubHand  = BASE_EMERGE_HAND,
+		LowerArm = BASE_EMERGE_ARM,
 	},
 
-	-- 2) Raise of Hand (Apex Wind-up)
+	-- 2) Raise of Hand (Apex Wind-up - Towers high with 0.00 wrist gap)
 	Raise = {
-		MainHand = toStudioCFrame(Vector3.new(-207.17, 129.235, -39.829), Vector3.new(18.125, -166.564, -76.134)),
-		SubHand  = toStudioCFrame(Vector3.new(-207.17, 129.235, -39.829), Vector3.new(18.125, -166.564, -76.134)),
-		LowerArm = toStudioCFrame(Vector3.new(-229.323, 133.593, -37.418), Vector3.new(18.125, -166.564, -139.682)),
+		SubHand  = BASE_RAISE_HAND,
+		LowerArm = BASE_RAISE_ARM,
 	},
 
-	-- 3) Hitting Ground (Violent Slam Base Pose)
+	-- 3) Hitting Ground (Base Violent Slam Pose)
 	HitGround = {
-		MainHand = toStudioCFrame(Vector3.new(-218.412, 65.568, -15.716), Vector3.new(18.125, -166.564, 1.374)),
-		SubHand  = toStudioCFrame(Vector3.new(-151.714, 61.17, -30.17),   Vector3.new(18.125, -166.564, -88.626)),
-		LowerArm = toStudioCFrame(Vector3.new(-220.23, 86.704, -23.81),   Vector3.new(18.125, -166.564, -62.174)),
+		SubHand  = BASE_HIT_HAND,
+		LowerArm = BASE_HIT_ARM,
 	}
 }
 
--- ============================================================================
--- KINEMATIC SHOULDER-ANCHORED SOLVER & ANATOMICAL WRIST HINGE
--- ============================================================================
-local PORTAL_PIVOT = POSES.PortalShoulderPivot -- Vector3.new(-245.0, 102.018, -30.455)
-local BASE_HIT_ARM = POSES.HitGround.LowerArm
-local BASE_HIT_SUB = POSES.HitGround.SubHand
-local BASE_HIT_MAIN = POSES.HitGround.MainHand
+-- Direction, length and baseline parameters of LowerArm
+local BASE_ARM_ROT = BASE_HIT_ARM.Rotation
+local BASE_HAND_ROT = BASE_HIT_HAND.Rotation
+local BASE_ARM_VEC = BASE_HIT_ARM:PointToWorldSpace(ARM_WRIST_LOCAL) - BASE_HIT_ARM:PointToWorldSpace(ARM_SHOULDER_LOCAL)
+local BASE_ARM_DIR = BASE_ARM_VEC.Unit
+local ARM_LENGTH = BASE_ARM_VEC.Magnitude -- 89.214 studs
 
--- Visual anatomical wrist joint locations:
--- LowerArm: size (17.52, 91.09, 24.47), wrist tip is at -Y (-45.54 studs)
--- SubHand:  size (25.07, 55.82, 32.11), wrist base is at +Y (+27.91 studs)
-local ARM_WRIST_LOCAL  = Vector3.new(0, -45.54, 0)
-local HAND_WRIST_LOCAL = Vector3.new(-5.368, 27.981, 1.308)
-
-local HIT_REL_HAND_TO_ARM = BASE_HIT_ARM:Inverse() * BASE_HIT_SUB
-local HIT_REL_MAIN_TO_HAND = BASE_HIT_SUB:Inverse() * BASE_HIT_MAIN
-
-local BASE_RAISE_ARM = POSES.Raise.LowerArm
-local BASE_RAISE_SUB = POSES.Raise.SubHand
-local BASE_RAISE_MAIN = POSES.Raise.MainHand
-local RAISE_REL_HAND_TO_ARM = BASE_RAISE_ARM:Inverse() * BASE_RAISE_SUB
-local RAISE_REL_MAIN_TO_HAND = BASE_RAISE_SUB:Inverse() * BASE_RAISE_MAIN
-
--- Authored strike direction and distance from portal pivot
-local AUTHORED_DIR_XZ = Vector3.new(BASE_HIT_SUB.Position.X - PORTAL_PIVOT.X, 0, BASE_HIT_SUB.Position.Z - PORTAL_PIVOT.Z)
-local AUTHORED_DIST = AUTHORED_DIR_XZ.Magnitude -- ~93.3 studs
+local PORTAL_ORIGIN = POSES.PortalShoulderPivot
+local PALM_TO_WRIST_OFFSET = BASE_HIT_HAND:VectorToWorldSpace(HAND_WRIST_LOCAL)
+local AUTHORED_DIR_XZ = Vector3.new(BASE_HIT_HAND.Position.X - PORTAL_ORIGIN.X, 0, BASE_HIT_HAND.Position.Z - PORTAL_ORIGIN.Z)
 local AUTHORED_YAW = math.atan2(-AUTHORED_DIR_XZ.X, -AUTHORED_DIR_XZ.Z)
 
--- Calculates the exact shoulder-anchored Raise and HitGround poses for ANY target point
-local function computeArticulatedPosesForTarget(circleCenter: Vector3)
-	local targetDirXZ = Vector3.new(circleCenter.X - PORTAL_PIVOT.X, 0, circleCenter.Z - PORTAL_PIVOT.Z)
-	local targetDist = targetDirXZ.Magnitude
-	local targetYaw = math.atan2(-targetDirXZ.X, -targetDirXZ.Z)
+-- Calculates the exact, mathematically rigid Raise and HitGround poses for ANY target point
+-- (Middle, Long Range, or Very Short Range) with GUARANTEED 0.000 studs wrist joint gap!
+local function computeArticulatedPosesForTarget(circleCenter: Vector3): ({ LowerArm: CFrame, SubHand: CFrame }, { LowerArm: CFrame, SubHand: CFrame })
+	-- 1. Slam HitGround Pose:
+	-- The palm lands squarely on circleCenter at ground contact level (Y = 61.17)
+	local wristTarget = Vector3.new(circleCenter.X, 61.17, circleCenter.Z) + PALM_TO_WRIST_OFFSET
+	local aimDir = (wristTarget - PORTAL_ORIGIN).Unit
+	local shoulderPos = wristTarget - (aimDir * ARM_LENGTH)
 
-	-- 1. Clamp lateral yaw swing to [-22 deg, +22 deg] so the 91-stud arm stays cleanly
-	-- inside the portal doorway and never slices sideways through the stone pillar columns.
-	local deltaYaw = math.atan2(math.sin(targetYaw - AUTHORED_YAW), math.cos(targetYaw - AUTHORED_YAW))
-	deltaYaw = math.clamp(deltaYaw, math.rad(-22), math.rad(22))
+	local rotDiff: CFrame
+	if BASE_ARM_DIR:Cross(aimDir).Magnitude < 0.0001 then
+		rotDiff = CFrame.identity
+	else
+		rotDiff = CFrame.fromAxisAngle(
+			BASE_ARM_DIR:Cross(aimDir).Unit,
+			math.acos(math.clamp(BASE_ARM_DIR:Dot(aimDir), -1, 1))
+		)
+	end
 
-	-- 2. Clamp target reach distance to natural anatomical reach [0.75, 1.15] (70 to 108 studs).
-	-- Applies a controlled telescoping offset along the strike ray so the proximal shoulder tip
-	-- ALWAYS remains rooted inside the black hole portal opening!
-	local reachFactor = math.clamp(targetDist / math.max(AUTHORED_DIST, 1), 0.75, 1.15)
-	local aimUnit = (targetDist > 0.001) and (targetDirXZ / targetDist) or Vector3.new(1, 0, 0)
-	local extensionOffset = aimUnit * ((reachFactor - 1.0) * AUTHORED_DIST * 0.5)
+	local newArmRot = rotDiff * BASE_ARM_ROT
+	local armPos = shoulderPos - (newArmRot * ARM_SHOULDER_LOCAL)
+	local armCF = CFrame.new(armPos) * newArmRot
 
-	-- 3. Shoulder-Rooted Ground Impact Pose (Rigid wrist = 0.00 studs separation anywhere)
-	local hitPivotCF = CFrame.new(PORTAL_PIVOT) * CFrame.Angles(0, deltaYaw, 0) * CFrame.new(-PORTAL_PIVOT)
-	local solvedHitArm = (hitPivotCF * BASE_HIT_ARM) + extensionOffset
-	local solvedHitSub = solvedHitArm * HIT_REL_HAND_TO_ARM
-	local solvedHitMain = solvedHitSub * HIT_REL_MAIN_TO_HAND
+	local armWristWorld = armCF:PointToWorldSpace(ARM_WRIST_LOCAL)
+	local newHandRot = rotDiff * BASE_HAND_ROT
+	local handPos = armWristWorld - (newHandRot * HAND_WRIST_LOCAL)
+	local handCF = CFrame.new(handPos) * newHandRot
 
 	local dynamicHitPose = {
-		LowerArm = solvedHitArm,
-		SubHand  = solvedHitSub,
-		MainHand = solvedHitMain,
+		LowerArm = armCF,
+		SubHand  = handCF,
 	}
 
-	-- 4. Shoulder-Rooted Raise / Apex Wind-up Pose (Rotates arm toward target from portal hinge)
-	local raisePivotCF = CFrame.new(PORTAL_PIVOT) * CFrame.Angles(0, deltaYaw * 0.60, 0) * CFrame.new(-PORTAL_PIVOT)
+	-- 2. Apex Wind-Up Raise Pose:
+	-- Smoothly rotates the arm toward the target yaw from portal shoulder hinge
+	local targetDirXZ = Vector3.new(circleCenter.X - PORTAL_ORIGIN.X, 0, circleCenter.Z - PORTAL_ORIGIN.Z)
+	local targetYaw = math.atan2(-targetDirXZ.X, -targetDirXZ.Z)
+	local deltaYaw = math.atan2(math.sin(targetYaw - AUTHORED_YAW), math.cos(targetYaw - AUTHORED_YAW))
+	deltaYaw = math.clamp(deltaYaw, math.rad(-25), math.rad(25))
+
+	local raisePivotCF = CFrame.new(PORTAL_ORIGIN) * CFrame.Angles(0, deltaYaw, 0) * CFrame.new(-PORTAL_ORIGIN)
 	local solvedRaiseArm = raisePivotCF * BASE_RAISE_ARM
-	local solvedRaiseSub = solvedRaiseArm * RAISE_REL_HAND_TO_ARM
-	local solvedRaiseMain = solvedRaiseSub * RAISE_REL_MAIN_TO_HAND
+	local raiseWristWorld = solvedRaiseArm:PointToWorldSpace(ARM_WRIST_LOCAL)
+	local solvedRaiseHand = CFrame.new(raiseWristWorld) * (solvedRaiseArm.Rotation * BASE_RAISE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
 
 	local dynamicRaisePose = {
 		LowerArm = solvedRaiseArm,
-		SubHand  = solvedRaiseSub,
-		MainHand = solvedRaiseMain,
+		SubHand  = solvedRaiseHand,
 	}
 
 	return dynamicRaisePose, dynamicHitPose
@@ -199,18 +206,57 @@ local DANGER_CIRCLE_RATIO = 0.80
 -- DYNAMIC WORKSPACE RESOLUTION
 -- ============================================================================
 local function resolveHazardInstances()
-	local ruinsDoor = Workspace:FindFirstChild("Ruins door") or Workspace:FindFirstChild("RuinsDoor")
+	local map = Workspace:FindFirstChild("BidToSurviveMap")
+	local ruinsDoor = (map and (map:FindFirstChild("Ruins door") or map:FindFirstChild("RuinsDoor")))
+		or Workspace:FindFirstChild("Ruins door")
+		or Workspace:FindFirstChild("RuinsDoor")
+		or Workspace:FindFirstChild("Ruins door", true)
+
 	local doorSlide: BasePart? = nil
 	local blackHole: Instance? = nil
 
 	if ruinsDoor then
-		doorSlide = ruinsDoor:FindFirstChild("doorSlide", true) :: BasePart?
+		doorSlide = (ruinsDoor:FindFirstChild("doorSlide", true) or ruinsDoor:FindFirstChild("DoorSlide", true)) :: BasePart?
 		blackHole = ruinsDoor:FindFirstChild("Blackhole", true)
 			or ruinsDoor:FindFirstChild("BlackHole", true)
 			or ruinsDoor:FindFirstChild("black hole", true)
 	end
 
-	-- Ensure Blackhole parts are strictly anchored and non-colliding
+	-- Resolve Hand model and its articulated parts
+	local handModel = (ruinsDoor and (ruinsDoor:FindFirstChild("hand", true) or ruinsDoor:FindFirstChild("Hand", true)))
+		or (map and (map:FindFirstChild("hand", true) or map:FindFirstChild("Hand", true)))
+		or Workspace:FindFirstChild("hand")
+		or Workspace:FindFirstChild("Hand")
+
+	local subHand: BasePart? = nil
+	local lowerArm: BasePart? = nil
+
+	if handModel then
+		subHand = (handModel:FindFirstChild("LeftHand") or handModel:FindFirstChild("Hand") or handModel:FindFirstChild("hand")) :: BasePart?
+		lowerArm = (handModel:FindFirstChild("LeftLowerArm") or handModel:FindFirstChild("LowerArm") or handModel:FindFirstChild("lowerarm") or handModel:FindFirstChild("lower arm")) :: BasePart?
+	end
+
+	if not subHand and ruinsDoor then
+		subHand = ruinsDoor:FindFirstChild("LeftHand", true) :: BasePart?
+	end
+	if not lowerArm and ruinsDoor then
+		lowerArm = (ruinsDoor:FindFirstChild("LeftLowerArm", true) or ruinsDoor:FindFirstChild("LowerArm", true)) :: BasePart?
+	end
+
+	-- Strip any rigid welding locks or joints that prevent CFrame tweens from animating freely
+	local animatedParts = { doorSlide, subHand, lowerArm }
+	for _, part in ipairs(animatedParts) do
+		if part and part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			for _, child in ipairs(part:GetChildren()) do
+				if child:IsA("JointInstance") or child:IsA("Constraint") then
+					child:Destroy()
+				end
+			end
+		end
+	end
+
 	if blackHole then
 		for _, d in ipairs(blackHole:GetDescendants()) do
 			if d:IsA("BasePart") then
@@ -220,35 +266,7 @@ local function resolveHazardInstances()
 		end
 	end
 
-	-- Resolve Hand model and its articulated parts
-	local handModel = (ruinsDoor and (ruinsDoor:FindFirstChild("hand", true) or ruinsDoor:FindFirstChild("Hand", true)))
-		or Workspace:FindFirstChild("hand")
-		or Workspace:FindFirstChild("Hand")
-
-	local subHand: BasePart? = nil
-	local lowerArm: BasePart? = nil
-	local mainHandPart: BasePart? = nil
-
-	if handModel then
-		subHand = (handModel:FindFirstChild("LeftHand") or handModel:FindFirstChild("Hand") or handModel:FindFirstChild("hand")) :: BasePart?
-		lowerArm = (handModel:FindFirstChild("LeftLowerArm") or handModel:FindFirstChild("LowerArm") or handModel:FindFirstChild("lowerarm") or handModel:FindFirstChild("lower arm")) :: BasePart?
-		
-		local candidateMain = handModel:FindFirstChild("MainHand") or handModel:FindFirstChild("UpperArm") or handModel:FindFirstChild("LeftUpperArm")
-		if candidateMain and candidateMain:IsA("BasePart") then
-			mainHandPart = candidateMain
-		elseif handModel:IsA("BasePart") and handModel ~= subHand and handModel ~= lowerArm then
-			mainHandPart = handModel
-		end
-	end
-
-	if not subHand then
-		subHand = Workspace:FindFirstChild("LeftHand", true) :: BasePart?
-	end
-	if not lowerArm then
-		lowerArm = (Workspace:FindFirstChild("LeftLowerArm", true) or Workspace:FindFirstChild("LowerArm", true)) :: BasePart?
-	end
-
-	return ruinsDoor, doorSlide, blackHole, handModel, subHand, lowerArm, mainHandPart
+	return ruinsDoor, doorSlide, blackHole, handModel, subHand, lowerArm
 end
 
 -- Helper: Computes GameplayArea Walkway Bounds, Top Surface Y, Size, Color, and Material
@@ -542,18 +560,26 @@ local function tweenBlackHoleScale(bhInstance: Instance?, startScale: number, en
 	end)
 end
 
-local function setHandPartsState(subHand: BasePart?, lowerArm: BasePart?, mainHandPart: BasePart?, isVisible: boolean)
-	local parts = { subHand, lowerArm, mainHandPart }
+local function setBlackHoleVisibility(bhInstance: Instance?, isVisible: boolean)
+	if not bhInstance then return end
+	for _, desc in ipairs(bhInstance:GetDescendants()) do
+		if desc:IsA("ParticleEmitter") then
+			desc.Enabled = isVisible
+		elseif desc:IsA("Light") then
+			desc.Enabled = isVisible
+		elseif desc:IsA("BasePart") and desc.Name == "Main" then
+			desc.Transparency = isVisible and 0 or 1
+		end
+	end
+end
+
+local function setHandPartsState(subHand: BasePart?, lowerArm: BasePart?, isVisible: boolean)
+	local parts = { subHand, lowerArm }
 	for _, part in ipairs(parts) do
 		if part and part:IsA("BasePart") then
 			part.Anchored = true
 			part.CanCollide = false
 			part.Transparency = isVisible and 0 or 1
-			for _, child in ipairs(part:GetChildren()) do
-				if child:IsA("Weld") or child:IsA("Motor6D") or child:IsA("RigidConstraint") then
-					child.Enabled = not isVisible
-				end
-			end
 		end
 	end
 end
@@ -571,24 +597,16 @@ local function setDoorBlockerVisibility(ruinsDoor: Instance?, isOpen: boolean)
 	end
 end
 
-local function tweenHandPose(subHand: BasePart?, lowerArm: BasePart?, mainHandPart: BasePart?, poseTable: any, tweenInfo: TweenInfo): Tween?
-	local t1 = mainHandPart and tweenObjectCFrame(mainHandPart, poseTable.MainHand, tweenInfo) or nil
-	local t2 = subHand and tweenObjectCFrame(subHand, poseTable.SubHand, tweenInfo) or nil
-	local t3 = lowerArm and tweenObjectCFrame(lowerArm, poseTable.LowerArm, tweenInfo) or nil
-	return t2 or t3 or t1
-end
-
 -- Kinematic Arm & Hand Driver: Pins the wrist attachment point of SubHand to LowerArm
 -- on every single Heartbeat frame, eliminating linear tween chord separation mid-swing!
 local function tweenArticulatedArm(
 	subHand: BasePart?,
 	lowerArm: BasePart?,
-	mainHandPart: BasePart?,
-	targetPose: any,
+	targetPose: { LowerArm: CFrame, SubHand: CFrame },
 	tweenInfo: TweenInfo
 ): Tween?
 	if not lowerArm or not subHand then
-		return tweenHandPose(subHand, lowerArm, mainHandPart, targetPose, tweenInfo)
+		return nil
 	end
 
 	local startArmCF = lowerArm.CFrame
@@ -603,19 +621,19 @@ local function tweenArticulatedArm(
 	if not armTween then return nil end
 
 	local startTime = os.clock()
-	local duration = tweenInfo.Time
+	local duration = math.max(tweenInfo.Time, 0.001)
 	local style = tweenInfo.EasingStyle
 	local dir = tweenInfo.EasingDirection
 
 	local conn: RBXScriptConnection? = nil
 	conn = RunService.Heartbeat:Connect(function()
 		if not lowerArm or not lowerArm.Parent or not subHand or not subHand.Parent then
-			if conn then conn:Disconnect() end
+			if conn then conn:Disconnect() conn = nil end
 			return
 		end
 
 		local elapsed = os.clock() - startTime
-		local progress = math.clamp(elapsed / math.max(duration, 0.001), 0, 1)
+		local progress = math.clamp(elapsed / duration, 0, 1)
 		local alpha = TweenService:GetValue(progress, style, dir)
 
 		local curArmCF = lowerArm.CFrame
@@ -624,9 +642,6 @@ local function tweenArticulatedArm(
 		local curSubCF = CFrame.new(armWristWorld) * (curArmCF.Rotation * curRelRot) * CFrame.new(-HAND_WRIST_LOCAL)
 
 		subHand.CFrame = curSubCF
-		if mainHandPart and targetPose.MainHand then
-			mainHandPart.CFrame = curSubCF * HIT_REL_MAIN_TO_HAND
-		end
 	end)
 
 	armTween.Completed:Once(function()
@@ -634,8 +649,8 @@ local function tweenArticulatedArm(
 			conn:Disconnect()
 			conn = nil
 		end
+		if lowerArm then lowerArm.CFrame = targetPose.LowerArm end
 		if subHand then subHand.CFrame = targetPose.SubHand end
-		if mainHandPart and targetPose.MainHand then mainHandPart.CFrame = targetPose.MainHand end
 	end)
 
 	return armTween
@@ -658,7 +673,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 	isSequenceActive = true
 
 	local success, err = pcall(function()
-		local ruinsDoor, doorSlide, blackHole, handModel, subHand, lowerArm, mainHandPart = resolveHazardInstances()
+		local ruinsDoor, doorSlide, blackHole, handModel, subHand, lowerArm = resolveHazardInstances()
 
 		print("[RuinsDoorHandManager] Starting 5-Stage Cinematic Sequence...")
 
@@ -699,6 +714,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 			TweenInfo.new(doorOpenTime, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
 		)
 
+		setBlackHoleVisibility(blackHole, true)
 		setBlackholeParticlesEnabled(blackHole, true)
 		tweenBlackHoleScale(blackHole, 0.001, POSES.BlackHoleTargetScale, doorOpenTime, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
@@ -707,31 +723,32 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		-- ------------------------------------------------------------------------
 		-- STAGE 2: HAND EMERGES OUT OF PORTAL (0.85s)
 		-- ------------------------------------------------------------------------
-		setHandPartsState(subHand, lowerArm, mainHandPart, true)
+		setHandPartsState(subHand, lowerArm, true)
 
-		if subHand then subHand.CFrame = POSES.Emerge.SubHand * CFrame.new(0, 0, 30) end
 		if lowerArm then lowerArm.CFrame = POSES.Emerge.LowerArm * CFrame.new(0, 0, 30) end
+		if subHand and lowerArm then
+			local w = lowerArm.CFrame:PointToWorldSpace(ARM_WRIST_LOCAL)
+			subHand.CFrame = CFrame.new(w) * (lowerArm.CFrame.Rotation * BASE_EMERGE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
+		end
 
-		local emergeTween = tweenHandPose(
+		local emergeTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
-			mainHandPart,
 			POSES.Emerge,
 			TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 		)
 		if emergeTween then emergeTween.Completed:Wait() else task.wait(0.85) end
 
 		-- ------------------------------------------------------------------------
-		-- STAGE 3: HAND RAISE / APEX WIND-UP - HARD LOCK 80% RED CIRCLE
+		-- STAGE 3: HAND RAISE / APEX WIND-UP - HARD LOCK 80% RED CIRCLE (0.70s + 0.14s)
 		-- ------------------------------------------------------------------------
-		-- Recalculate target position right as hand raises so target cannot pre-run
 		local circleCenter, circleRadius, currentFloorColor, currentFloorMat, lockedTarget =
 			RuinsDoorHandManager.CalculateTargetDangerCircle(customPlayerData)
 
-		-- Razor-Thin Bottleneck formula: (circleRadius * 0.72) / SPRINT_SPEED
-		local lockedWarningTime = math.clamp((circleRadius * 0.72) / 21, 0.90, 1.35)
 		local slamTime = 0.22
-		local raiseDuration = math.max(0.60, lockedWarningTime - slamTime - 0.12)
+		local raiseDuration = 0.70
+		local apexHold = 0.14
+		local lockedWarningTime = raiseDuration + apexHold + slamTime
 
 		-- Fire 80% Red Warning Circle to all clients NOW!
 		if RunService:IsRunning() and RunService:IsServer() then
@@ -743,14 +760,13 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		local raiseTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
-			mainHandPart,
 			dynamicRaisePose,
 			TweenInfo.new(raiseDuration, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 		)
 		if raiseTween then raiseTween.Completed:Wait() else task.wait(raiseDuration) end
 
 		-- Dramatic apex hang-time before plunge
-		task.wait(0.12)
+		task.wait(apexHold)
 
 		-- ------------------------------------------------------------------------
 		-- STAGE 4: GROUND SLAM & SYNCHRONIZED PLAYER DAMAGE (0.22s)
@@ -758,7 +774,6 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		local slamTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
-			mainHandPart,
 			dynamicHitPose,
 			TweenInfo.new(slamTime, Enum.EasingStyle.Exponential, Enum.EasingDirection.In)
 		)
@@ -848,13 +863,12 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		local retractTween = tweenArticulatedArm(
 			subHand,
 			lowerArm,
-			mainHandPart,
 			POSES.Emerge,
 			TweenInfo.new(0.65, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
 		)
 		if retractTween then retractTween.Completed:Wait() else task.wait(0.65) end
 
-		setHandPartsState(subHand, lowerArm, mainHandPart, false)
+		setHandPartsState(subHand, lowerArm, false)
 
 		if RunService:IsRunning() and RunService:IsServer() then
 			PortalRemote:FireAllClients(false, 1.0, 0.001)
@@ -868,6 +882,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		)
 		if closeTween then closeTween.Completed:Wait() else task.wait(1.0) end
 
+		setBlackHoleVisibility(blackHole, false)
 		setBlackholeParticlesEnabled(blackHole, false)
 
 		if setDoorPartsVisibilityCallback then

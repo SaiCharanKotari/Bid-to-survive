@@ -401,7 +401,7 @@ local function SetHammerVisual(rarityData)
     damageTitle.Text = string.format("DEALS %d%% HP DAMAGE", rarityData.DamagePercent or 30)
 end
 
-local function PlayHammerRoulette(targetRarity, totalDuration)
+local function PlayHammerRoulette(targetRarity, totalDuration, spinnerReel)
     if IsRoulettePlaying or (not IsActiveInRound()) then return end
     IsRoulettePlaying = true
     local myToken = SessionToken
@@ -414,14 +414,27 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
     rarityTitle.TextTransparency = 0
     damageTitle.TextTransparency = 0
     
-    local rarities = GameConfig.GetRarityList()
     local delays = {
         0.10, 0.10, 0.11, 0.11, 0.12, 0.13, 0.14, 0.16,
         0.18, 0.20, 0.23, 0.27, 0.31, 0.36, 0.42, 0.50,
         0.60, 0.72, 0.85
     }
     
-    local currentIdx = 1
+    -- Use server-provided anti-repeat randomized reel or generate local fallback
+    local reel = spinnerReel
+    if not reel or #reel < #delays then
+        if GameConfig.BuildRandomSpinnerStrip then
+            reel = GameConfig.BuildRandomSpinnerStrip(CurrentRound or 1, #delays, #delays, targetRarity.Name)
+        else
+            reel = {}
+            local order = GameConfig.RarityOrder or {"Common", "Uncommon", "Rare", "Legendary", "Mythical"}
+            for i = 1, #delays do
+                reel[i] = order[((i - 1) % #order) + 1]
+            end
+            reel[#delays] = targetRarity.Name
+        end
+    end
+    
     for i, delay in ipairs(delays) do
         if (not IsActiveInRound()) or myToken ~= SessionToken then
             rouletteContainer.Visible = false
@@ -429,8 +442,8 @@ local function PlayHammerRoulette(targetRarity, totalDuration)
             return
         end
         
-        currentIdx = (currentIdx % #rarities) + 1
-        local r = rarities[currentIdx]
+        local stepRarityName = reel[i] or targetRarity.Name
+        local r = GameConfig.HammerRarities[stepRarityName] or targetRarity
         SetHammerVisual(r)
         
         local tiltAngle = (i % 2 == 0) and 7 or -7
@@ -644,8 +657,9 @@ StateChanged.OnClientEvent:Connect(function(data)
         voteModal.Visible = false
         
         if rarity then
+            local spinnerReel = (data.Extra and data.Extra.SpinnerReel) or data.SpinnerReel
             task.spawn(function()
-                PlayHammerRoulette(rarity, data.RouletteDuration or 6.0)
+                PlayHammerRoulette(rarity, data.RouletteDuration or 6.0, spinnerReel)
             end)
         end
         

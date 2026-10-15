@@ -6,7 +6,6 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local RuinsDoorHandManager = require(ServerScriptService:WaitForChild("RuinsDoorHandManager"))
-local GorillaSmashManager = require(ServerScriptService:WaitForChild("GorillaSmashManager"))
 local Network = ReplicatedStorage:WaitForChild("Network")
 
 local StateChanged = Network:WaitForChild("StateChanged")
@@ -36,6 +35,19 @@ if not ParticipationChanged then
     ParticipationChanged.Name = "ParticipationChanged"
     ParticipationChanged.Parent = Network
 end
+
+-- Ensure ClientLoadReadyEvent RemoteEvent exists
+local ClientLoadReadyEvent = Network:FindFirstChild("ClientLoadReadyEvent")
+if not ClientLoadReadyEvent then
+    ClientLoadReadyEvent = Instance.new("RemoteEvent")
+    ClientLoadReadyEvent.Name = "ClientLoadReadyEvent"
+    ClientLoadReadyEvent.Parent = Network
+end
+
+ClientLoadReadyEvent.OnServerEvent:Connect(function(player)
+    player:SetAttribute("ClientReady", true)
+    print(string.format("[BOOT HIERARCHY] 📥 Received ClientLoadReadyEvent from %s. ClientReady=true", player.Name))
+end)
 
 local Map = workspace:WaitForChild("BidToSurviveMap")
 local SpawnArea = Map:WaitForChild("SpawnArea")
@@ -116,7 +128,8 @@ local function BroadcastState(phaseName, duration, extra)
         Rarity = CurrentRarity,
         LivingCount = livingCount,
         ExposedPlayer = ExposedPlayerId and PlayerData[ExposedPlayerId] and PlayerData[ExposedPlayerId].Name or nil,
-        Extra = extra
+        Extra = extra,
+        SpinnerReel = extra and extra.SpinnerReel or nil,
     })
 end
 
@@ -307,7 +320,10 @@ local function TriggerHammerSmash(rarity, onImpactCallback, customPlayerData)
         onImpactCallback,
         customPlayerData,
         function(isOpen)
-            local ruinsDoor = workspace:FindFirstChild("Ruins door") or workspace:FindFirstChild("RuinsDoor")
+            local map = workspace:FindFirstChild("BidToSurviveMap")
+            local ruinsDoor = (map and (map:FindFirstChild("Ruins door") or map:FindFirstChild("RuinsDoor")))
+                or workspace:FindFirstChild("Ruins door")
+                or workspace:FindFirstChild("RuinsDoor")
             if ruinsDoor then
                 for _, desc in ipairs(ruinsDoor:GetDescendants()) do
                     local nameLower = desc.Name:lower()
@@ -416,8 +432,10 @@ local function RunMatch(session)
             break
         end
         
-        -- Roll Server-Authoritative Rarity
-        CurrentRarity = GameConfig.RollRarity()
+        -- Roll Server-Authoritative Rarity using Round-by-Round Probability Weights
+        CurrentRarity = GameConfig.RollRarity(CurrentRound)
+        local spinnerReel = GameConfig.BuildRandomSpinnerStrip(CurrentRound, 19, 19, CurrentRarity.Name)
+        print(string.format("[ROUND] Rolled Hammer for Round %d: %s (%d%% DMG)", CurrentRound, CurrentRarity.Name, CurrentRarity.DamagePercent))
         
         ------------------------------------------------------------------------
         -- PHASE 1: SPAWN / HAMMER ROULETTE REVEAL
@@ -442,6 +460,7 @@ local function RunMatch(session)
         BroadcastState("Phase1_Spawn", spawnDuration, {
             Round = CurrentRound,
             Rarity = CurrentRarity,
+            SpinnerReel = spinnerReel,
             RouletteDuration = GameConfig.RouletteDuration or 6.0,
             HoldDuration = GameConfig.RouletteHoldTime or 1.5,
         })
@@ -573,25 +592,20 @@ local function RunMatch(session)
         print(string.format("[ROUND] Rankings END elapsed=%.2f", os.clock() - p4Start))
         
         ------------------------------------------------------------------------
-        -- PHASE 5: THE SURVIVAL STANCE (Neon Green Shield Visible, 9s)
+        -- PHASE 5: THE SURVIVAL STANCE & RUINS DOOR HAZARD SMASH (9s)
         ------------------------------------------------------------------------
         local scrambleDuration = GameConfig.ScrambleTime or 9.0
         print(string.format("[ROUND] SurvivalStance START duration=%.1f", scrambleDuration))
         local p5Start = os.clock()
         
         BroadcastState("Phase5_Scramble", scrambleDuration, { SafeCount = safeCount })
-        task.wait(scrambleDuration)
-        print(string.format("[ROUND] SurvivalStance END elapsed=%.2f", os.clock() - p5Start))
-        
-        ------------------------------------------------------------------------
-        -- PHASE 6: HAMMER SMASH (Neon Shield Protects Winners)
-        ------------------------------------------------------------------------
-        print("[ROUND] HammerSmash START (Ruins Door Hand Hazard)")
-        local p6Start = os.clock()
-        
-        BroadcastState("Phase6_Smash", 6, { Rarity = CurrentRarity })
         
         local dmg = math.floor((GameConfig.MaxHealth * CurrentRarity.DamagePercent) / 100)
+        
+        -- Trigger Phase 6 Hammer Smash notification as the arm apex raise/slam approaches
+        task.delay(1.5, function()
+            BroadcastState("Phase6_Smash", 4.0, { Rarity = CurrentRarity })
+        end)
         
         TriggerHammerSmash(CurrentRarity, function(escapedPlayers, hitPlayers)
             -- Impact damage applied ONLY to players caught inside the 80% Red Circle and unprotected!
@@ -632,7 +646,7 @@ local function RunMatch(session)
         end, PlayerData)
         
         ClearWinnerGlow()
-        print(string.format("[ROUND] HammerSmash END elapsed=%.2f", os.clock() - p6Start))
+        print(string.format("[ROUND] SurvivalStance & Smash END elapsed=%.2f", os.clock() - p5Start))
         
         ------------------------------------------------------------------------
         -- PHASE 7: SETTLEMENT & ELIMINATIONS (4 Seconds)
@@ -820,12 +834,32 @@ Players.PlayerRemoving:Connect(function(player)
     PlayerData[player.UserId] = nil
 end)
 
+local function GetReadyEligiblePlayers()
+    local ready = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        local data = PlayerData[player.UserId]
+        local isAfk = player:GetAttribute("IsAFK") or (data and data.IsAFK)
+        local isClientReady = player:GetAttribute("ClientReady") == true
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local isR6 = hum and hum.RigType == Enum.HumanoidRigType.R6
+        local isLiving = hum and hum.Health > 0
+        if not isAfk and isClientReady and isR6 and isLiving then
+            table.insert(ready, player)
+        end
+    end
+    return ready
+end
+
 -- Main Server Lifecycle Loop
 task.spawn(function()
-    task.wait(1.5)
     while true do
-        local count = #Players:GetPlayers()
-        if count >= GameConfig.MinPlayersToStart then
+        local readyPlayers = GetReadyEligiblePlayers()
+        if #readyPlayers < GameConfig.MinPlayersToStart then
+            BroadcastState("WaitingForPlayers", 0, { Needed = GameConfig.MinPlayersToStart, Reason = "Waiting for R6 avatar, animations and map to load" })
+            task.wait(0.5)
+        else
+            print("[BOOT HIERARCHY] ✅ Step 1 (R6 Rig) -> Step 2 (Walk/Run/Dive Anims) -> Step 3 (Ruins Door Ready) complete! Starting LobbyCountdown.")
             CurrentRoundSession = CurrentRoundSession + 1
             local session = CurrentRoundSession
             
@@ -835,8 +869,9 @@ task.spawn(function()
             
             local cancelled = false
             for sec = duration, 1, -1 do
-                if #Players:GetPlayers() < GameConfig.MinPlayersToStart or session ~= CurrentRoundSession then
-                    print("[ROUND] LobbyCountdown CANCELLED (players left)")
+                local curReady = GetReadyEligiblePlayers()
+                if #curReady < GameConfig.MinPlayersToStart or session ~= CurrentRoundSession then
+                    print("[ROUND] LobbyCountdown CANCELLED (players left or unready)")
                     cancelled = true
                     break
                 end
@@ -844,13 +879,10 @@ task.spawn(function()
                 task.wait(1)
             end
             
-            if not cancelled and session == CurrentRoundSession and #Players:GetPlayers() >= GameConfig.MinPlayersToStart then
+            if not cancelled and session == CurrentRoundSession and #GetReadyEligiblePlayers() >= GameConfig.MinPlayersToStart then
                 print(string.format("[ROUND] LobbyCountdown END elapsed=%.2f", os.clock() - countdownStart))
                 RunMatch(session)
             end
-        else
-            BroadcastState("WaitingForPlayers", 0, { Needed = GameConfig.MinPlayersToStart })
-            task.wait(1.5)
         end
     end
 end)

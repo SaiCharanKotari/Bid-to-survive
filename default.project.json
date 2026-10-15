@@ -8,6 +8,9 @@
       "GameConfig": {
         "$path": "src/shared/GameConfig.luau"
       },
+      "HammerRarityRoller": {
+        "$path": "src/shared/HammerRarityRoller.luau"
+      },
       "GorillaMotionData": {
         "$path": "src/shared/GorillaMotionData.luau"
       }
@@ -24,11 +27,8 @@
       "RuinsDoorHandManager": {
         "$path": "src/server/RuinsDoorHandManager.luau"
       },
-      "GorillaSmashManager": {
-        "$path": "src/server/GorillaSmashManager.luau"
-      },
-      "GorillaMotionData": {
-        "$path": "src/server/GorillaMotionData.luau"
+      "R6AvatarManager": {
+        "$path": "src/server/R6AvatarManager.server.luau"
       }
     },
 
@@ -58,6 +58,12 @@
         },
         "GorillaImpactClient": {
           "$path": "src/client/GorillaImpactClient.client.luau"
+        }
+      },
+      "StarterCharacterScripts": {
+        "$ignoreUnknownInstances": true,
+        "Health": {
+          "$path": "src/character/Health.server.luau"
         }
       }
     },

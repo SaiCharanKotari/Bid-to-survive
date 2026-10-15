@@ -128,6 +128,63 @@ end
 
 buildSpawnBoxFromFences()
 
+-- 3.5 Ensure Thick Mud Foundation Exists Beneath Both Grass Walkways
+local function ensureMudFoundations()
+	local map = Workspace:FindFirstChild("BidToSurviveMap")
+	if not map then return end
+
+	-- 1. Spawn Area Mud Foundation (20 studs thick)
+	local spawnArea = map:FindFirstChild("SpawnArea")
+	local spawnGround = spawnArea and spawnArea:FindFirstChild("Ground")
+	local spawnWalkway = spawnGround and spawnGround:FindFirstChild("Walkway")
+	if spawnWalkway and spawnGround and not spawnGround:FindFirstChild("MudFoundation") then
+		local height = 20
+		local topY = spawnWalkway.Position.Y - (spawnWalkway.Size.Y * 0.5)
+		local centerY = topY - (height * 0.5)
+
+		local mud = Instance.new("Part")
+		mud.Name = "MudFoundation"
+		mud.Size = Vector3.new(spawnWalkway.Size.X, height, spawnWalkway.Size.Z)
+		mud.Position = Vector3.new(spawnWalkway.Position.X, centerY, spawnWalkway.Position.Z)
+		mud.Material = Enum.Material.Mud
+		mud.Color = Color3.fromRGB(86, 58, 38)
+		mud.Anchored = true
+		mud.CanCollide = true
+		mud.CanTouch = true
+		mud.CanQuery = true
+		mud.TopSurface = Enum.SurfaceType.Smooth
+		mud.BottomSurface = Enum.SurfaceType.Smooth
+		mud.Parent = spawnGround
+		print("[SpawnAndAFKManager] ✅ Created 20-stud thick Mud Foundation under Spawn Area.")
+	end
+
+	-- 2. Gameplay Area Mud Foundation (24 studs thick)
+	local gameArea = map:FindFirstChild("GameplayArea")
+	local gameWalkway = gameArea and gameArea:FindFirstChild("Walkway")
+	if gameWalkway and gameArea and not gameArea:FindFirstChild("MudFoundation") then
+		local height = 24
+		local topY = gameWalkway.Position.Y - (gameWalkway.Size.Y * 0.5)
+		local centerY = topY - (height * 0.5)
+
+		local mud = Instance.new("Part")
+		mud.Name = "MudFoundation"
+		mud.Size = Vector3.new(gameWalkway.Size.X, height, gameWalkway.Size.Z)
+		mud.Position = Vector3.new(gameWalkway.Position.X, centerY, gameWalkway.Position.Z)
+		mud.Material = Enum.Material.Mud
+		mud.Color = Color3.fromRGB(86, 58, 38)
+		mud.Anchored = true
+		mud.CanCollide = true
+		mud.CanTouch = true
+		mud.CanQuery = true
+		mud.TopSurface = Enum.SurfaceType.Smooth
+		mud.BottomSurface = Enum.SurfaceType.Smooth
+		mud.Parent = gameArea
+		print("[SpawnAndAFKManager] ✅ Created 24-stud thick Mud Foundation under Gameplay Area.")
+	end
+end
+
+ensureMudFoundations()
+
 -- 4. Unified AFK Teleport & Attribute Handler
 local function handleAFKToggle(player: Player, isAFK: boolean?)
 	local currentAFK = player:GetAttribute("IsAFK") or false

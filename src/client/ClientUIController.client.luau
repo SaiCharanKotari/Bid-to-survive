@@ -66,10 +66,11 @@ local roundLabel = statsCard and statsCard:WaitForChild("RoundLabel", 3)
 
 local rarityBadge = gui:FindFirstChild("RarityBadge")
 local biddingModal = gui:WaitForChild("BiddingModal")
-local bidInput = biddingModal:WaitForChild("BidInput")
-local submitBtn = biddingModal:WaitForChild("SubmitBtn")
-local submittedNotice = biddingModal:WaitForChild("SubmittedNotice")
-local quickFrame = biddingModal:WaitForChild("QuickFrame")
+local cardFrame = biddingModal:WaitForChild("CardFrame", 5) or biddingModal
+local bidInput = cardFrame:WaitForChild("BidInput", 5) or biddingModal:WaitForChild("BidInput")
+local submitBtn = cardFrame:FindFirstChild("SubmitBtn", true) or biddingModal:WaitForChild("SubmitBtn")
+local submittedNotice = cardFrame:FindFirstChild("SubmittedNotice", true) or biddingModal:WaitForChild("SubmittedNotice")
+local quickFrame = biddingModal:FindFirstChild("QuickFrame") or cardFrame:FindFirstChild("QuickFrame") or Instance.new("Frame")
 
 local rankingsModal = gui:WaitForChild("RankingsModal")
 local voteModal = gui:WaitForChild("VoteModal")
@@ -114,55 +115,110 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------------------
--- 1. REOPEN BUTTON CONTAINER & ROULETTE CONTAINER SETUP
+-- 1. REOPEN BUTTON CONTAINER & ROULETTE CONTAINER SETUP (SVG.3 RED GRADIENT)
 --------------------------------------------------------------------------------
-local reopenContainer = gui:FindFirstChild("ReopenContainer") or Instance.new("Frame")
-reopenContainer.Name = "ReopenContainer"
-reopenContainer.Size = UDim2.new(0, 320, 0, 34)
-reopenContainer.Position = UDim2.new(0.5, -160, 0, 96)
-reopenContainer.BackgroundTransparency = 1
-reopenContainer.ZIndex = 35
-reopenContainer.Parent = gui
+local function applySVG3ButtonStyle(button: TextButton, labelText: string, textSize: number?)
+    button.AutoButtonColor = false
+    button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    button.BackgroundTransparency = 0
+    button.BorderSizePixel = 0
+    button.Text = "" -- Keep native text blank so UIGradient does NOT tint text red
 
-local reopenBidBtn = reopenContainer:FindFirstChild("ReopenBidBtn") or Instance.new("TextButton")
+    local corner = button:FindFirstChildOfClass("UICorner")
+    if not corner then
+        corner = Instance.new("UICorner")
+        corner.Parent = button
+    end
+    corner.CornerRadius = UDim.new(0, 1)
+
+    local stroke = button:FindFirstChildOfClass("UIStroke")
+    if not stroke then
+        stroke = Instance.new("UIStroke")
+        stroke.Parent = button
+    end
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Thickness = 5
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.LineJoinMode = Enum.LineJoinMode.Miter
+
+    local gradient = button:FindFirstChildOfClass("UIGradient")
+    if not gradient then
+        gradient = Instance.new("UIGradient")
+        gradient.Parent = button
+    end
+    gradient.Rotation = 90
+    gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.00, Color3.fromHex("#EC0000")),
+        ColorSequenceKeypoint.new(0.54, Color3.fromHex("#F50505")),
+        ColorSequenceKeypoint.new(0.78, Color3.fromHex("#E25A5A")),
+        ColorSequenceKeypoint.new(1.00, Color3.fromHex("#D6C7C7")),
+    })
+    gradient.Enabled = true
+
+    -- Independent Crisp White TextLabel (Guaranteed unaffected by UIGradient)
+    local label = button:FindFirstChild("BtnLabel") :: TextLabel?
+    if not label then
+        label = Instance.new("TextLabel")
+        label.Name = "BtnLabel"
+        label.Size = UDim2.fromScale(1, 1)
+        label.Position = UDim2.fromScale(0, 0)
+        label.BackgroundTransparency = 1
+        label.ZIndex = button.ZIndex + 3
+        label.Parent = button
+    end
+    label.Text = labelText
+    label.Font = Enum.Font.GothamMedium
+    label.TextSize = textSize or 28
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    label.TextYAlignment = Enum.TextYAlignment.Center
+end
+
+local centerActionDock = gui:FindFirstChild("CenterActionDock") or gui:FindFirstChild("ReopenContainer") or Instance.new("Frame")
+centerActionDock.Name = "CenterActionDock"
+centerActionDock.AnchorPoint = Vector2.new(0.5, 0.5)
+centerActionDock.Position = UDim2.new(0.5, 0, 0.42, 0) -- Exactly middle and slightly UP
+centerActionDock.Size = UDim2.new(0, 460, 0, 62)
+centerActionDock.BackgroundTransparency = 1
+centerActionDock.ZIndex = 35
+centerActionDock.Visible = false
+centerActionDock.Parent = gui
+
+local reopenContainer = centerActionDock -- Backward compatibility alias
+
+local reopenBidBtn = centerActionDock:FindFirstChild("ReopenBidBtn") or Instance.new("TextButton")
 reopenBidBtn.Name = "ReopenBidBtn"
-reopenBidBtn.Size = UDim2.new(0, 150, 0, 32)
-reopenBidBtn.Position = UDim2.new(0, 0, 0, 0)
-reopenBidBtn.BackgroundColor3 = Color3.fromRGB(16, 24, 20)
-reopenBidBtn.Text = "OPEN BID CARD"
-reopenBidBtn.TextColor3 = Color3.fromRGB(60, 220, 110)
-reopenBidBtn.Font = Enum.Font.GothamBold
-reopenBidBtn.TextSize = 12
-reopenBidBtn.Visible = false
+reopenBidBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+reopenBidBtn.Size = UDim2.new(0, 210, 0, 62)
+reopenBidBtn.Position = UDim2.new(0.5, -118, 0.5, 0)
 reopenBidBtn.ZIndex = 36
-local rbbCorner = reopenBidBtn:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-rbbCorner.CornerRadius = UDim.new(0, 6)
-rbbCorner.Parent = reopenBidBtn
-local rbbStroke = reopenBidBtn:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-rbbStroke.Color = Color3.fromRGB(40, 180, 90)
-rbbStroke.Thickness = 1
-rbbStroke.Parent = reopenBidBtn
-reopenBidBtn.Parent = reopenContainer
+reopenBidBtn.Visible = false
+reopenBidBtn.Parent = centerActionDock
+applySVG3ButtonStyle(reopenBidBtn, "BID", 28)
 
-local reopenRankBtn = reopenContainer:FindFirstChild("ReopenRankBtn") or Instance.new("TextButton")
+local reopenRankBtn = centerActionDock:FindFirstChild("ReopenRankBtn") or Instance.new("TextButton")
 reopenRankBtn.Name = "ReopenRankBtn"
-reopenRankBtn.Size = UDim2.new(0, 150, 0, 32)
-reopenRankBtn.Position = UDim2.new(0, 160, 0, 0)
-reopenRankBtn.BackgroundColor3 = Color3.fromRGB(16, 22, 32)
-reopenRankBtn.Text = "LEADERBOARD"
-reopenRankBtn.TextColor3 = Color3.fromRGB(0, 210, 255)
-reopenRankBtn.Font = Enum.Font.GothamBold
-reopenRankBtn.TextSize = 12
-reopenRankBtn.Visible = false
+reopenRankBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+reopenRankBtn.Size = UDim2.new(0, 210, 0, 62)
+reopenRankBtn.Position = UDim2.new(0.5, 118, 0.5, 0)
 reopenRankBtn.ZIndex = 36
-local rrbCorner = reopenRankBtn:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-rrbCorner.CornerRadius = UDim.new(0, 6)
-rrbCorner.Parent = reopenRankBtn
-local rrbStroke = reopenRankBtn:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-rrbStroke.Color = Color3.fromRGB(0, 180, 220)
-rrbStroke.Thickness = 1
-rrbStroke.Parent = reopenRankBtn
-reopenRankBtn.Parent = reopenContainer
+reopenRankBtn.Visible = false
+reopenRankBtn.Parent = centerActionDock
+applySVG3ButtonStyle(reopenRankBtn, "LEADERBOARD", 20)
+
+local function updateCenterDockLayout()
+    local bidVis = reopenBidBtn.Visible
+    local rankVis = reopenRankBtn.Visible
+    centerActionDock.Visible = (bidVis or rankVis)
+    if bidVis and rankVis then
+        reopenBidBtn.Position = UDim2.new(0.5, -118, 0.5, 0)
+        reopenRankBtn.Position = UDim2.new(0.5, 118, 0.5, 0)
+    elseif bidVis then
+        reopenBidBtn.Position = UDim2.new(0.5, 0, 0.5, 0)
+    elseif rankVis then
+        reopenRankBtn.Position = UDim2.new(0.5, 0, 0.5, 0)
+    end
+end
 
 local rouletteContainer = gui:FindFirstChild("RouletteContainer") or Instance.new("Frame")
 rouletteContainer.Name = "RouletteContainer"
@@ -259,9 +315,13 @@ end
 
 local function UpdateHUDVisibility()
     local inPlayground = IsInPlayground()
-    healthBarBg.Visible = false
-    cashLabel.Visible = false
-    roundLabel.Position = UDim2.new(0, 0, 0, 0)
+    if healthBarBg then healthBarBg.Visible = false end
+    if cashLabel then cashLabel.Visible = false end
+    if roundLabel then roundLabel.Position = UDim2.new(0, 0, 0, 0) end
+    if statsCard then
+        local inGame = (player:GetAttribute("IsInGame") == true)
+        statsCard.Position = UDim2.new(0, 24, 1, inGame and -192 or -134)
+    end
 end
 
 local function ForceHideAllRoundUI()
@@ -273,9 +333,9 @@ local function ForceHideAllRoundUI()
     voteModal.Visible = false
     matchOverModal.Visible = false
     rouletteContainer.Visible = false
-    reopenContainer.Visible = false
     reopenBidBtn.Visible = false
     reopenRankBtn.Visible = false
+    updateCenterDockLayout()
     screenFlash.BackgroundTransparency = 1
     IsRoulettePlaying = false
     UpdateHUDVisibility()
@@ -284,26 +344,31 @@ end
 --------------------------------------------------------------------------------
 -- 4. HUD STYLING (ROUND LABEL & AFK TOGGLE BUTTON)
 --------------------------------------------------------------------------------
-statsCard.BackgroundTransparency = 1
-local oldCardStroke = statsCard:FindFirstChildOfClass("UIStroke")
-if oldCardStroke then oldCardStroke:Destroy() end
-local oldCardCorner = statsCard:FindFirstChildOfClass("UICorner")
-if oldCardCorner then oldCardCorner:Destroy() end
+if statsCard then
+    statsCard.BackgroundTransparency = 1
+    local oldCardStroke = statsCard:FindFirstChildOfClass("UIStroke")
+    if oldCardStroke then oldCardStroke:Destroy() end
+    local oldCardCorner = statsCard:FindFirstChildOfClass("UICorner")
+    if oldCardCorner then oldCardCorner:Destroy() end
 
-statsCard.Size = UDim2.new(0, 260, 0, 24)
-statsCard.Position = UDim2.new(0, 24, 1, -154)
+    local initialInGame = (player:GetAttribute("IsInGame") == true)
+    statsCard.Size = UDim2.new(0, 260, 0, 24)
+    statsCard.Position = UDim2.new(0, 24, 1, initialInGame and -192 or -134)
+end
 
 -- Hide duplicate cash box & health bar (rendered by unified MovementDiveAndHUDClient)
-cashLabel.Visible = false
-healthBarBg.Visible = false
+if cashLabel then cashLabel.Visible = false end
+if healthBarBg then healthBarBg.Visible = false end
 
 -- Round Label positioned cleanly above the status stack
-roundLabel.Position = UDim2.new(0, 0, 0, 0)
-roundLabel.Size = UDim2.new(1, 0, 1, 0)
-roundLabel.TextXAlignment = Enum.TextXAlignment.Left
-roundLabel.TextColor3 = Color3.fromRGB(150, 165, 185)
-roundLabel.Font = Enum.Font.GothamMedium
-roundLabel.TextSize = 13
+if roundLabel then
+    roundLabel.Position = UDim2.new(0, 0, 0, 0)
+    roundLabel.Size = UDim2.new(1, 0, 1, 0)
+    roundLabel.TextXAlignment = Enum.TextXAlignment.Left
+    roundLabel.TextColor3 = Color3.fromRGB(150, 165, 185)
+    roundLabel.Font = Enum.Font.GothamMedium
+    roundLabel.TextSize = 13
+end
 
 UpdateHUDVisibility()
 
@@ -312,14 +377,31 @@ if rarityBadge then
 end
 
 --------------------------------------------------------------------------------
--- AFK TOGGLE BUTTON ON LEFT SIDE (STRICTLY TEXT ONLY: AFK: OFF / AFK: ON)
+-- SETTINGS GEAR & AFK TOGGLE BUTTON (COMIC POP-ART STYLE MATCHING SVG.2)
 --------------------------------------------------------------------------------
+local settingsButton = gui:FindFirstChild("SettingsButton") or Instance.new("ImageButton")
+settingsButton.Name = "SettingsButton"
+settingsButton.Size = UDim2.new(0, 48, 0, 48)
+settingsButton.Position = UDim2.new(0, 24, 0, 24)
+settingsButton.BackgroundTransparency = 1
+settingsButton.Image = "rbxassetid://6031280882" -- Clean vector gear icon
+settingsButton.ImageColor3 = Color3.fromRGB(30, 30, 30)
+settingsButton.ZIndex = 20
+settingsButton.Parent = gui
+
+settingsButton.MouseButton1Click:Connect(function()
+    pcall(function()
+        game:GetService("GuiService"):SetMenuIsOpen(true)
+    end)
+end)
+
 local afkButton = gui:FindFirstChild("AFKButton") or Instance.new("TextButton")
 afkButton.Name = "AFKButton"
-afkButton.Size = UDim2.new(0, 96, 0, 26)
-afkButton.Position = UDim2.new(0, 24, 1, -188)
-afkButton.Font = Enum.Font.GothamBold
-afkButton.TextSize = 12
+afkButton.Size = UDim2.new(0, 152, 0, 48)
+afkButton.Position = UDim2.new(0, 24, 0, 84)
+afkButton.Font = Enum.Font.GothamBlack
+afkButton.TextSize = 18
+afkButton.TextColor3 = Color3.fromRGB(0, 0, 0)
 afkButton.ZIndex = 20
 afkButton.AutoButtonColor = false
 
@@ -328,20 +410,18 @@ afkCorner.CornerRadius = UDim.new(0, 4)
 afkCorner.Parent = afkButton
 
 local afkStroke = afkButton:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-afkStroke.Thickness = 1
+afkStroke.Thickness = 3
+afkStroke.Color = Color3.fromRGB(0, 0, 0)
+afkStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 afkStroke.Parent = afkButton
 
 local function UpdateAFKVisual()
     if IsAFK then
-        afkButton.BackgroundColor3 = Color3.fromRGB(28, 20, 14)
-        afkButton.TextColor3 = Color3.fromRGB(255, 175, 50)
-        afkButton.Text = "AFK: ON"
-        afkStroke.Color = Color3.fromRGB(215, 130, 25)
+        afkButton.BackgroundColor3 = Color3.fromRGB(255, 221, 0) -- Yellow when ON
+        afkButton.Text = "AFK:ON"
     else
-        afkButton.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
-        afkButton.TextColor3 = Color3.fromRGB(150, 165, 185)
-        afkButton.Text = "AFK: OFF"
-        afkStroke.Color = Color3.fromRGB(36, 42, 56)
+        afkButton.BackgroundColor3 = Color3.fromRGB(0, 220, 80) -- Green when OFF
+        afkButton.Text = "AFK:OFF"
     end
 end
 
@@ -369,18 +449,14 @@ reopenBidBtn.MouseButton1Click:Connect(function()
     if not IsActiveInRound() then return end
     biddingModal.Visible = true
     reopenBidBtn.Visible = false
-    if not reopenRankBtn.Visible then
-        reopenContainer.Visible = false
-    end
+    updateCenterDockLayout()
 end)
 
 reopenRankBtn.MouseButton1Click:Connect(function()
     if not IsActiveInRound() then return end
     rankingsModal.Visible = true
     reopenRankBtn.Visible = false
-    if not reopenBidBtn.Visible then
-        reopenContainer.Visible = false
-    end
+    updateCenterDockLayout()
 end)
 
 --------------------------------------------------------------------------------
@@ -536,13 +612,15 @@ StatsUpdated.OnClientEvent:Connect(function(stats)
         CurrentParticipationState = stats.ParticipationState
     end
     
-    cashLabel.Text = string.format("$%.2f", CurrentMoney)
+    if cashLabel then cashLabel.Text = string.format("$%.2f", CurrentMoney) end
     
-    local hpPct = math.clamp(CurrentHealth / 100, 0, 1)
-    TweenService:Create(healthBarFill, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Size = UDim2.new(hpPct, 0, 1, 0)
-    }):Play()
-    healthText.Text = string.format("%d / 100", CurrentHealth)
+    if healthBarFill then
+        local hpPct = math.clamp(CurrentHealth / 100, 0, 1)
+        TweenService:Create(healthBarFill, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(hpPct, 0, 1, 0)
+        }):Play()
+    end
+    if healthText then healthText.Text = string.format("%d / 100", CurrentHealth) end
     
     if CurrentHealth < oldHealth and IsActiveInRound() then
         screenFlash.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
@@ -571,8 +649,8 @@ end)
 local function handleClientHUDReset()
     CurrentHealth = 100
     IsAlive = true
-    healthText.Text = "100 / 100"
-    healthBarFill.Size = UDim2.new(1, 0, 1, 0)
+    if healthText then healthText.Text = "100 / 100" end
+    if healthBarFill then healthBarFill.Size = UDim2.new(1, 0, 1, 0) end
     UpdateHUDVisibility()
 end
 
@@ -592,8 +670,8 @@ player.CharacterAdded:Connect(function(newChar)
     if hum then
         CurrentHealth = hum.Health
         local maxH = (hum.MaxHealth > 0) and hum.MaxHealth or 100
-        healthText.Text = string.format("%d / %d", math.ceil(hum.Health), math.ceil(maxH))
-        healthBarFill.Size = UDim2.new(math.clamp(hum.Health / maxH, 0, 1), 0, 1, 0)
+        if healthText then healthText.Text = string.format("%d / %d", math.ceil(hum.Health), math.ceil(maxH)) end
+        if healthBarFill then healthBarFill.Size = UDim2.new(math.clamp(hum.Health / maxH, 0, 1), 0, 1, 0) end
     end
     UpdateHUDVisibility()
 end)
@@ -611,18 +689,25 @@ StateChanged.OnClientEvent:Connect(function(data)
     CurrentPhaseDeadline = data.Deadline or (os.clock() + (data.Duration or 0))
     UpdateHUDVisibility()
     
-    if IsActiveInRound() then
-        roundLabel.Text = string.format("ROUND %d • %d ALIVE", round, living)
-    elseif IsAFK then
-        roundLabel.Text = "LOBBY (AFK)"
-    else
-        roundLabel.Text = "WAITING IN LOBBY"
+    if roundLabel then
+        if IsActiveInRound() then
+            roundLabel.Text = string.format("ROUND %d • %d ALIVE", round, living)
+        elseif IsAFK then
+            roundLabel.Text = "LOBBY (AFK)"
+        else
+            roundLabel.Text = "WAITING IN LOBBY"
+        end
     end
     
-    -- Auto-hide reopen buttons when switching phases
-    reopenBidBtn.Visible = false
-    reopenRankBtn.Visible = false
-    reopenContainer.Visible = false
+    if phase == "Intermission" or phase == "MatchOver" or not IsActiveInRound() then
+        reopenBidBtn.Visible = false
+        reopenRankBtn.Visible = false
+        updateCenterDockLayout()
+    else
+        reopenBidBtn.Visible = not biddingModal.Visible
+        reopenRankBtn.Visible = not rankingsModal.Visible
+        updateCenterDockLayout()
+    end
     
     if phase == "Intermission" then
         if IsAFK then
@@ -720,75 +805,144 @@ StateChanged.OnClientEvent:Connect(function(data)
 end)
 
 --------------------------------------------------------------------------------
--- 9. BIDDING MODAL (WITH RED X CLOSE BUTTON & REOPEN BUTTON)
+-- 9. BIDDING MODAL (COMIC POP-ART STYLE WITH RED X & BID BUTTON)
 --------------------------------------------------------------------------------
-local closeBidBtn = biddingModal:FindFirstChild("CloseBidBtn") or Instance.new("TextButton")
-closeBidBtn.Name = "CloseBidBtn"
-closeBidBtn.Size = UDim2.new(0, 26, 0, 26)
-closeBidBtn.Position = UDim2.new(1, -34, 0, 8)
-closeBidBtn.BackgroundColor3 = Color3.fromRGB(220, 45, 55)
-closeBidBtn.Text = "✕"
-closeBidBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBidBtn.Font = Enum.Font.GothamBold
-closeBidBtn.TextSize = 14
-closeBidBtn.ZIndex = 25
-local cbbCorner = closeBidBtn:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-cbbCorner.CornerRadius = UDim.new(0, 13)
-cbbCorner.Parent = closeBidBtn
-closeBidBtn.Parent = biddingModal
+local closeBidBtn = cardFrame:FindFirstChild("CloseBidBtn", true) or biddingModal:FindFirstChild("CloseBidBtn")
+if not closeBidBtn then
+    closeBidBtn = Instance.new("TextButton")
+    closeBidBtn.Name = "CloseBidBtn"
+    closeBidBtn.Size = UDim2.new(0, 36, 0, 34)
+    closeBidBtn.Position = UDim2.new(1, -16, 0, 14)
+    closeBidBtn.AnchorPoint = Vector2.new(1, 0)
+    closeBidBtn.BackgroundColor3 = Color3.fromRGB(245, 0, 0)
+    closeBidBtn.Text = "X"
+    closeBidBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBidBtn.Font = Enum.Font.GothamBlack
+    closeBidBtn.TextSize = 20
+    closeBidBtn.ZIndex = 26
+    local cbbCorner = Instance.new("UICorner")
+    cbbCorner.CornerRadius = UDim.new(0, 6)
+    cbbCorner.Parent = closeBidBtn
+    local cbbStroke = Instance.new("UIStroke")
+    cbbStroke.Thickness = 2
+    cbbStroke.Color = Color3.fromRGB(0, 0, 0)
+    cbbStroke.Parent = closeBidBtn
+    closeBidBtn.Parent = cardFrame
+end
 
 closeBidBtn.MouseButton1Click:Connect(function()
     biddingModal.Visible = false
     if IsActiveInRound() then
-        reopenContainer.Visible = true
         reopenBidBtn.Visible = true
+        updateCenterDockLayout()
     end
 end)
+
+-- 2X Font Size for Bid Input & Strict Dot/Number Filter
+bidInput.TextSize = 36
+bidInput.Font = Enum.Font.RobotoMono
+
+-- Strictly filter typed input in real-time to numbers and a single decimal point '.'
+bidInput:GetPropertyChangedSignal("Text"):Connect(function()
+    local text = bidInput.Text
+    local filtered = ""
+    local hasDot = false
+    for i = 1, #text do
+        local c = text:sub(i, i)
+        if c:match("%d") then
+            filtered = filtered .. c
+        elseif c == "." and not hasDot then
+            filtered = filtered .. c
+            hasDot = true
+        end
+    end
+    if text ~= filtered then
+        bidInput.Text = filtered
+    end
+end)
+
+-- Exact SVG.3 Styling for Modal's BID Submit Button
+applySVG3ButtonStyle(submitBtn, "BID", 28)
 
 PromptBid.OnClientEvent:Connect(function(data)
     if not IsActiveInRound() then
         biddingModal.Visible = false
         reopenBidBtn.Visible = false
+        updateCenterDockLayout()
         return
     end
     HasSubmitted = false
     bidInput.Text = ""
     submittedNotice.Text = ""
-    submitBtn.Text = "SUBMIT BID"
-    submitBtn.BackgroundColor3 = Color3.fromRGB(0, 175, 90)
+    applySVG3ButtonStyle(submitBtn, "BID", 28)
+    submitBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+    submitBtn.Position = UDim2.new(0.5, 0, 0.5, 0)
+    submitBtn.Size = UDim2.new(1, 0, 1, 0)
+    
     biddingModal.Visible = true
     reopenBidBtn.Visible = false
+    updateCenterDockLayout()
+    
+    -- Smooth pop-in animation
+    biddingModal.Size = UDim2.new(0, 540, 0, 304)
+    TweenService:Create(biddingModal, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 600, 0, 338)
+    }):Play()
 end)
 
 local function setBidFraction(frac)
-    local amt = math.floor((CurrentMoney * frac) * 100) / 100
+    local wallet = player:GetAttribute("Wallet") or CurrentMoney
+    local amt = math.floor((wallet * frac) * 100) / 100
     bidInput.Text = string.format("%.2f", amt)
 end
 
-for _, btn in ipairs(quickFrame:GetChildren()) do
-    if btn:IsA("TextButton") then
-        btn.MouseButton1Click:Connect(function()
-            if btn.Text == "25%" then setBidFraction(0.25)
-            elseif btn.Text == "50%" then setBidFraction(0.50)
-            elseif btn.Text == "75%" then setBidFraction(0.75)
-            elseif btn.Text == "MAX" then setBidFraction(1.00)
-            elseif btn.Text == "CLEAR" then bidInput.Text = "0.00" end
-        end)
+if quickFrame then
+    for _, btn in ipairs(quickFrame:GetChildren()) do
+        if btn:IsA("TextButton") then
+            btn.MouseButton1Click:Connect(function()
+                if btn.Text == "25%" then setBidFraction(0.25)
+                elseif btn.Text == "50%" then setBidFraction(0.50)
+                elseif btn.Text == "75%" then setBidFraction(0.75)
+                elseif btn.Text == "MAX" then setBidFraction(1.00)
+                elseif btn.Text == "CLEAR" then bidInput.Text = "0.00" end
+            end)
+        end
     end
 end
 
 submitBtn.MouseButton1Click:Connect(function()
     if HasSubmitted or not IsActiveInRound() then return end
-    local val = tonumber(bidInput.Text) or 0
-    val = math.clamp(val, 0, CurrentMoney)
+    local wallet = player:GetAttribute("Wallet") or CurrentMoney
+    
+    -- Sanitize input: strip any non-digit, non-decimal characters (supports "$2.34", "2.34$", etc.)
+    local cleanStr = bidInput.Text:gsub("[^%d%.]", "")
+    local val = tonumber(cleanStr) or 0
+    val = math.clamp(val, 0, wallet)
     val = math.floor(val * 100) / 100
     
     HasSubmitted = true
     BidSubmitted:FireServer(val)
     
-    submitBtn.Text = "BID SUBMITTED!"
-    submitBtn.BackgroundColor3 = Color3.fromRGB(48, 56, 72)
+    submitBtn.Text = ""
+    local submitGrad = submitBtn:FindFirstChildOfClass("UIGradient")
+    if submitGrad then submitGrad.Enabled = false end
+    submitBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    local submitLabel = submitBtn:FindFirstChild("BtnLabel") :: TextLabel?
+    if submitLabel then
+        submitLabel.Text = "SUBMITTED!"
+        submitLabel.TextColor3 = Color3.fromRGB(160, 255, 160)
+    end
     submittedNotice.Text = string.format("Secret Bid Registered: $%.2f", val)
+    
+    -- Tactile sound feedback
+    pcall(function()
+        local clickSound = Instance.new("Sound")
+        clickSound.SoundId = "rbxasset://sounds/action_jump.mp3"
+        clickSound.Volume = 0.5
+        clickSound.Parent = SoundService
+        clickSound:Play()
+        game:GetService("Debris"):AddItem(clickSound, 1)
+    end)
 end)
 
 --------------------------------------------------------------------------------
@@ -848,8 +1002,8 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     closeRankBtn.MouseButton1Click:Connect(function()
         rankingsModal.Visible = false
         if IsActiveInRound() then
-            reopenContainer.Visible = true
             reopenRankBtn.Visible = true
+            updateCenterDockLayout()
         end
     end)
     

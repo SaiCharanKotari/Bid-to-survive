@@ -6,6 +6,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local RuinsDoorHandManager = require(ServerScriptService:WaitForChild("RuinsDoorHandManager"))
+local CashAndWalletManager = require(ServerScriptService:WaitForChild("CashAndWalletManager"))
 local Network = ReplicatedStorage:WaitForChild("Network")
 
 local StateChanged = Network:WaitForChild("StateChanged")
@@ -111,6 +112,23 @@ local function GetSpectatorPlayers()
         end
     end
     return spectators
+end
+
+local function GetReadyEligiblePlayers()
+    local ready = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        local data = PlayerData[player.UserId]
+        local isAfk = player:GetAttribute("IsAFK") or (data and data.IsAFK)
+        local isClientReady = player:GetAttribute("ClientReady") == true
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local isR6 = hum and hum.RigType == Enum.HumanoidRigType.R6
+        local isLiving = hum and hum.Health > 0
+        if not isAfk and isClientReady and isR6 and isLiving then
+            table.insert(ready, player)
+        end
+    end
+    return ready
 end
 
 local function BroadcastState(phaseName, duration, extra)
@@ -351,16 +369,17 @@ local function InitMatch()
     -- Cleanly respawn any dead players, restore 100 HP, reset attributes, and fire ResetHUDStateEvent
     RuinsDoorHandManager.ResetAllPlayersForNewGame()
     
+    local startingWallet = CashAndWalletManager.STARTING_GAME_WALLET or 20
     for _, player in ipairs(Players:GetPlayers()) do
         local existing = PlayerData[player.UserId]
         local isAfk = (existing ~= nil) and existing.IsAFK or false
         local partState = isAfk and "AFK" or "WaitingInLobby"
-        local startingMoney = (existing and existing.Money) or GameConfig.StartingMoney
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
-            Money = startingMoney,
-            Health = GameConfig.MaxHealth, -- FIX: Always 100 on new match! (Previously 0 or MaxHealth kept 0 because 0 is truthy in Lua)
+            Money = startingWallet,
+            Wallet = startingWallet,
+            Health = GameConfig.MaxHealth,
             IsAlive = true,
             IsAFK = isAfk,
             ParticipationState = partState,
@@ -369,13 +388,14 @@ local function InitMatch()
             IsBot = false,
             Character = player.Character
         }
-        player:SetAttribute("Money", startingMoney)
-        player:SetAttribute("Wallet", startingMoney)
+        player:SetAttribute("Money", startingWallet)
+        player:SetAttribute("Wallet", startingWallet)
         player:SetAttribute("Health", GameConfig.MaxHealth)
         player:SetAttribute("HP", GameConfig.MaxHealth)
     end
     
     SetupCompanionBots(4)
+    CashAndWalletManager.StartGameForPlayers(GetReadyEligiblePlayers())
     SyncAllStats()
     ClearWinnerGlow()
 end
@@ -412,6 +432,7 @@ local function RunMatch(session)
             local winner = living[1]
             local winName = winner and winner.Name or "No One"
             print("[ROUND MANAGER] Match Ended! Sole Survivor: " .. winName)
+            CashAndWalletManager.EndGameAndRewardSurvivors()
             BroadcastState("MatchOver", 6, { Winner = winName })
             MatchOver:FireAllClients({
                 Winner = winName,
@@ -513,6 +534,8 @@ local function RunMatch(session)
                 local maxB = math.min(d.Money, math.random(15, 65) / 10)
                 d.CurrentBid = math.floor(maxB * 10) / 10
                 d.SubmitTime = math.random(80, 750) / 100
+                d.Money = math.max(0, d.Money - d.CurrentBid)
+                d.Wallet = d.Money
             end
         end
         
@@ -658,7 +681,9 @@ local function RunMatch(session)
         for _, bInfo in ipairs(topBidders) do
             local realData = PlayerData[bInfo.UserId]
             if realData and not realData.IsAFK and realData.ParticipationState == "Active" then
-                realData.Money = math.max(0, math.floor((realData.Money - realData.CurrentBid) * 100) / 100)
+                if realData.IsBot then
+                    realData.Money = math.max(0, math.floor((realData.Money - realData.CurrentBid) * 100) / 100)
+                end
             end
         end
         
@@ -687,7 +712,10 @@ local function RunMatch(session)
                 table.insert(elims, d.Name .. " (Eliminated)")
                 if not d.IsBot then
                     local p = Players:GetPlayerByUserId(d.UserId)
-                    if p then TeleportToLobby(p) end
+                    if p then
+                        CashAndWalletManager.SettlePlayerGameCash(p, "Eliminated")
+                        TeleportToLobby(p)
+                    end
                 elseif d.Character then
                     d.Character:Destroy()
                 end
@@ -718,14 +746,17 @@ BidSubmitted.OnServerEvent:Connect(function(player, amount)
             return -- Only first valid bid is accepted
         end
         local bid = tonumber(amount)
-        if not bid or bid ~= bid or bid < 0 or bid > data.Money then
+        if not bid or bid ~= bid or bid < 0 then
             return
         end
-        bid = math.floor(bid * 100) / 100
-        data.CurrentBid = bid
+        local ok, actualBid = CashAndWalletManager.TrySpendFromWallet(player, bid)
+        if not ok then return end
+        data.CurrentBid = actualBid
+        data.Money = player:GetAttribute("Wallet") or (data.Money - actualBid)
+        data.Wallet = data.Money
         local elapsed = math.max(0.01, os.clock() - PhaseStartTime)
         data.SubmitTime = math.floor(elapsed * 100) / 100
-        print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs", player.Name, data.CurrentBid, data.SubmitTime))
+        print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs (Wallet remaining: $%d)", player.Name, data.CurrentBid, data.SubmitTime, player:GetAttribute("Wallet") or 0))
     else
         warn(string.format("[SECURITY] Rejected bid from inactive/AFK player %s", player.Name))
     end
@@ -791,7 +822,8 @@ local function InitPlayer(player)
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
-            Money = GameConfig.StartingMoney,
+            Money = 0,
+            Wallet = 0,
             Health = GameConfig.MaxHealth,
             IsAlive = true,
             IsAFK = false, -- Default OFF as requested
@@ -801,6 +833,7 @@ local function InitPlayer(player)
             IsBot = false,
             Character = player.Character
         }
+        player:SetAttribute("IsInGame", false)
     end
     player.CharacterAdded:Connect(function(char)
         task.wait(0.5)
@@ -812,6 +845,7 @@ local function InitPlayer(player)
             data.Health = 0
             data.IsAlive = false
             data.ParticipationState = "Eliminated"
+            CashAndWalletManager.SettlePlayerGameCash(player, "Eliminated")
             SyncStats(player)
             TeleportToLobby(player)
         end
@@ -833,23 +867,6 @@ Players.PlayerAdded:Connect(InitPlayer)
 Players.PlayerRemoving:Connect(function(player)
     PlayerData[player.UserId] = nil
 end)
-
-local function GetReadyEligiblePlayers()
-    local ready = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        local data = PlayerData[player.UserId]
-        local isAfk = player:GetAttribute("IsAFK") or (data and data.IsAFK)
-        local isClientReady = player:GetAttribute("ClientReady") == true
-        local char = player.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        local isR6 = hum and hum.RigType == Enum.HumanoidRigType.R6
-        local isLiving = hum and hum.Health > 0
-        if not isAfk and isClientReady and isR6 and isLiving then
-            table.insert(ready, player)
-        end
-    end
-    return ready
-end
 
 -- Main Server Lifecycle Loop
 task.spawn(function()

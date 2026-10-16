@@ -360,7 +360,233 @@ return HammerRarityRoller
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="6">
+    <Item class="ModuleScript" referent="6">
+      <Properties>
+        <string name="Name">CashAndWalletManager</string>
+        <string name="Source"><![CDATA[--!strict
+-- ServerScriptService/CashAndWalletManager.luau
+-- Authoritative server economy manager for Bid-to-survive.
+-- Separates Persistent Lobby Cash (Inventory Money) from In-Game Starting Wallet ($20).
+-- Manages survival-time payout formula: Earned Cash = floor(Seconds Survived) * 20.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataStoreService = game:GetService("DataStoreService")
+
+local CashAndWalletManager = {}
+
+local STARTING_GAME_WALLET = 20 -- $20 given at the start of every game
+local CASH_PER_SECOND_SURVIVED = 20 -- Survived Time (s) * 20 = Earned Cash
+
+-- RemoteEvent for Payout Popup Animation in Lobby
+local PayoutRemote: RemoteEvent = (ReplicatedStorage:FindFirstChild("CashPayoutEvent") :: any)
+if not PayoutRemote then
+	PayoutRemote = Instance.new("RemoteEvent")
+	PayoutRemote.Name = "CashPayoutEvent"
+	PayoutRemote.Parent = ReplicatedStorage
+end
+
+-- Persistent DataStore for Inventory/Overall Cash across sessions
+local cashStore = nil
+pcall(function()
+	cashStore = DataStoreService:GetDataStore("BidToSurvive_OverallCash_v1")
+end)
+
+-- Active survival start timestamps per player for the current game
+local gameStartTimestamps: { [Player]: number } = {}
+local deathConnections: { [Player]: RBXScriptConnection } = {}
+
+local function syncLeaderstats(player: Player)
+	local ls = player:FindFirstChild("leaderstats")
+	if not ls then
+		ls = Instance.new("Folder")
+		ls.Name = "leaderstats"
+		ls.Parent = player
+	end
+
+	local cashStat = ls:FindFirstChild("Cash") :: IntValue?
+	if not cashStat then
+		cashStat = Instance.new("IntValue")
+		cashStat.Name = "Cash"
+		cashStat.Parent = ls
+	end
+	cashStat.Value = player:GetAttribute("OverallCash") or 0
+
+	local walletStat = ls:FindFirstChild("Wallet") :: IntValue?
+	if not walletStat then
+		walletStat = Instance.new("IntValue")
+		walletStat.Name = "Wallet"
+		walletStat.Parent = ls
+	end
+	walletStat.Value = player:GetAttribute("Wallet") or 0
+end
+
+local function setupPlayerEconomy(player: Player)
+	local savedCash = 0
+	if cashStore and player.UserId > 0 then
+		local ok, result = pcall(function()
+			return cashStore:GetAsync("Player_" .. tostring(player.UserId))
+		end)
+		if ok and typeof(result) == "number" then
+			savedCash = result
+		end
+	end
+
+	player:SetAttribute("OverallCash", savedCash)
+	player:SetAttribute("Wallet", 0)
+	player:SetAttribute("Money", 0)
+	player:SetAttribute("IsInGame", false) -- Starts in Lobby (Left-side Overall Cash visible)
+	syncLeaderstats(player)
+
+	player.AttributeChanged:Connect(function(attr)
+		if attr == "OverallCash" or attr == "Wallet" then
+			syncLeaderstats(player)
+		end
+	end)
+end
+
+local function savePlayerOverallCash(player: Player)
+	if not cashStore or player.UserId <= 0 then return end
+	local overall = player:GetAttribute("OverallCash") or 0
+	pcall(function()
+		cashStore:SetAsync("Player_" .. tostring(player.UserId), overall)
+	end)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+	task.spawn(setupPlayerEconomy, p)
+end
+Players.PlayerAdded:Connect(setupPlayerEconomy)
+
+Players.PlayerRemoving:Connect(function(player)
+	gameStartTimestamps[player] = nil
+	if deathConnections[player] then
+		deathConnections[player]:Disconnect()
+		deathConnections[player] = nil
+	end
+	savePlayerOverallCash(player)
+end)
+
+-- ============================================================================
+-- 1. CALL WHEN A NEW GAME STARTS (Right before Round 1 begins!)
+-- Gives every participating player $20 in their Bottom-Right Wallet & starts timer
+-- ============================================================================
+function CashAndWalletManager.StartGameForPlayers(activePlayers: { Player }?)
+	local participants = activePlayers or Players:GetPlayers()
+	local now = os.clock()
+
+	for _, player in ipairs(participants) do
+		if not player:GetAttribute("IsAFK") then
+			-- Set $20 Starting Wallet & switch UI from Lobby (Left) to In-Game (Bottom-Right)
+			player:SetAttribute("Wallet", STARTING_GAME_WALLET)
+			player:SetAttribute("Money", STARTING_GAME_WALLET) -- Compatibility alias
+			player:SetAttribute("CurrentBid", 0)
+			player:SetAttribute("IsInGame", true)
+
+			gameStartTimestamps[player] = now
+
+			-- Automatically settle survival cash if the player dies mid-game
+			if deathConnections[player] then
+				deathConnections[player]:Disconnect()
+				deathConnections[player] = nil
+			end
+
+			local char = player.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if hum then
+				deathConnections[player] = hum.Died:Once(function()
+					CashAndWalletManager.SettlePlayerGameCash(player, "Eliminated")
+				end)
+			end
+
+			print(string.format("[Economy] 💵 %s entered Game with Wallet = $%d", player.Name, STARTING_GAME_WALLET))
+		end
+	end
+end
+
+-- ============================================================================
+-- 2. SPEND FROM THE $20 WALLET DURING BIDDING PHASE
+-- ============================================================================
+function CashAndWalletManager.TrySpendFromWallet(player: Player, bidAmount: number): (boolean, number)
+	local currentWallet = player:GetAttribute("Wallet") or 0
+	local cleanBid = math.clamp(math.floor(bidAmount), 0, currentWallet)
+
+	local newWallet = currentWallet - cleanBid
+	player:SetAttribute("Wallet", newWallet)
+	player:SetAttribute("Money", newWallet)
+	player:SetAttribute("CurrentBid", cleanBid)
+	player:SetAttribute("BetTimestamp", os.clock())
+
+	return true, cleanBid
+end
+
+-- ============================================================================
+-- 3. SETTLE SURVIVAL PAYOUT WHEN PLAYER DIES OR GAME ENDS
+-- Formula: Time Survived (seconds) * 20 = Earned Cash -> Added to Lobby OverallCash
+-- ============================================================================
+function CashAndWalletManager.SettlePlayerGameCash(player: Player, reason: string?): (number, number)
+	local startTime = gameStartTimestamps[player]
+	if not startTime then
+		-- Already settled this game
+		player:SetAttribute("IsInGame", false)
+		return 0, 0
+	end
+
+	gameStartTimestamps[player] = nil
+	if deathConnections[player] then
+		deathConnections[player]:Disconnect()
+		deathConnections[player] = nil
+	end
+
+	local secondsSurvived = math.max(0, math.floor(os.clock() - startTime))
+	local earnedCash = secondsSurvived * CASH_PER_SECOND_SURVIVED
+	local previousOverall = player:GetAttribute("OverallCash") or 0
+	local newOverall = previousOverall + earnedCash
+
+	-- Update Persistent Lobby Cash & Switch UI back to Lobby Mode (Left-Side Display)
+	player:SetAttribute("OverallCash", newOverall)
+	player:SetAttribute("Wallet", 0)
+	player:SetAttribute("Money", 0)
+	player:SetAttribute("IsInGame", false)
+
+	-- Notify Client UI to show the "+$Earned (Survived Xs * 20)" animation on the Left Side
+	PayoutRemote:FireClient(player, earnedCash, secondsSurvived, newOverall, reason or "Game Over")
+
+	task.spawn(savePlayerOverallCash, player)
+
+	print(string.format(
+		"[Economy] 🏆 %s (%s) Survived %ds * 20 = +$%d Earned! Total Lobby Cash = $%d",
+		player.Name,
+		reason or "Finished",
+		secondsSurvived,
+		earnedCash,
+		newOverall
+	))
+
+	return earnedCash, secondsSurvived
+end
+
+-- ============================================================================
+-- 4. CALL WHEN THE ENTIRE GAME ENDS (Settles all remaining survivors!)
+-- ============================================================================
+function CashAndWalletManager.EndGameAndRewardSurvivors()
+	for _, player in ipairs(Players:GetPlayers()) do
+		if gameStartTimestamps[player] then
+			CashAndWalletManager.SettlePlayerGameCash(player, "Survived Game")
+		else
+			player:SetAttribute("IsInGame", false)
+		end
+	end
+end
+
+CashAndWalletManager.STARTING_GAME_WALLET = STARTING_GAME_WALLET
+CashAndWalletManager.CASH_PER_SECOND_SURVIVED = CASH_PER_SECOND_SURVIVED
+
+return CashAndWalletManager
+]]></string>
+      </Properties>
+    </Item>
+    <Item class="Script" referent="7">
       <Properties>
         <string name="Name">R6AvatarManager</string>
         <token name="RunContext">0</token>
@@ -513,7 +739,7 @@ print("[R6AvatarManager] Initialized: Authentic Roblox R6 Avatar Pipeline active
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="7">
+    <Item class="Script" referent="8">
       <Properties>
         <string name="Name">RoundManager</string>
         <token name="RunContext">0</token>
@@ -525,6 +751,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local RuinsDoorHandManager = require(ServerScriptService:WaitForChild("RuinsDoorHandManager"))
+local CashAndWalletManager = require(ServerScriptService:WaitForChild("CashAndWalletManager"))
 local Network = ReplicatedStorage:WaitForChild("Network")
 
 local StateChanged = Network:WaitForChild("StateChanged")
@@ -630,6 +857,23 @@ local function GetSpectatorPlayers()
         end
     end
     return spectators
+end
+
+local function GetReadyEligiblePlayers()
+    local ready = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        local data = PlayerData[player.UserId]
+        local isAfk = player:GetAttribute("IsAFK") or (data and data.IsAFK)
+        local isClientReady = player:GetAttribute("ClientReady") == true
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local isR6 = hum and hum.RigType == Enum.HumanoidRigType.R6
+        local isLiving = hum and hum.Health > 0
+        if not isAfk and isClientReady and isR6 and isLiving then
+            table.insert(ready, player)
+        end
+    end
+    return ready
 end
 
 local function BroadcastState(phaseName, duration, extra)
@@ -870,16 +1114,17 @@ local function InitMatch()
     -- Cleanly respawn any dead players, restore 100 HP, reset attributes, and fire ResetHUDStateEvent
     RuinsDoorHandManager.ResetAllPlayersForNewGame()
     
+    local startingWallet = CashAndWalletManager.STARTING_GAME_WALLET or 20
     for _, player in ipairs(Players:GetPlayers()) do
         local existing = PlayerData[player.UserId]
         local isAfk = (existing ~= nil) and existing.IsAFK or false
         local partState = isAfk and "AFK" or "WaitingInLobby"
-        local startingMoney = (existing and existing.Money) or GameConfig.StartingMoney
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
-            Money = startingMoney,
-            Health = GameConfig.MaxHealth, -- FIX: Always 100 on new match! (Previously 0 or MaxHealth kept 0 because 0 is truthy in Lua)
+            Money = startingWallet,
+            Wallet = startingWallet,
+            Health = GameConfig.MaxHealth,
             IsAlive = true,
             IsAFK = isAfk,
             ParticipationState = partState,
@@ -888,13 +1133,14 @@ local function InitMatch()
             IsBot = false,
             Character = player.Character
         }
-        player:SetAttribute("Money", startingMoney)
-        player:SetAttribute("Wallet", startingMoney)
+        player:SetAttribute("Money", startingWallet)
+        player:SetAttribute("Wallet", startingWallet)
         player:SetAttribute("Health", GameConfig.MaxHealth)
         player:SetAttribute("HP", GameConfig.MaxHealth)
     end
     
     SetupCompanionBots(4)
+    CashAndWalletManager.StartGameForPlayers(GetReadyEligiblePlayers())
     SyncAllStats()
     ClearWinnerGlow()
 end
@@ -931,6 +1177,7 @@ local function RunMatch(session)
             local winner = living[1]
             local winName = winner and winner.Name or "No One"
             print("[ROUND MANAGER] Match Ended! Sole Survivor: " .. winName)
+            CashAndWalletManager.EndGameAndRewardSurvivors()
             BroadcastState("MatchOver", 6, { Winner = winName })
             MatchOver:FireAllClients({
                 Winner = winName,
@@ -1032,6 +1279,8 @@ local function RunMatch(session)
                 local maxB = math.min(d.Money, math.random(15, 65) / 10)
                 d.CurrentBid = math.floor(maxB * 10) / 10
                 d.SubmitTime = math.random(80, 750) / 100
+                d.Money = math.max(0, d.Money - d.CurrentBid)
+                d.Wallet = d.Money
             end
         end
         
@@ -1177,7 +1426,9 @@ local function RunMatch(session)
         for _, bInfo in ipairs(topBidders) do
             local realData = PlayerData[bInfo.UserId]
             if realData and not realData.IsAFK and realData.ParticipationState == "Active" then
-                realData.Money = math.max(0, math.floor((realData.Money - realData.CurrentBid) * 100) / 100)
+                if realData.IsBot then
+                    realData.Money = math.max(0, math.floor((realData.Money - realData.CurrentBid) * 100) / 100)
+                end
             end
         end
         
@@ -1206,7 +1457,10 @@ local function RunMatch(session)
                 table.insert(elims, d.Name .. " (Eliminated)")
                 if not d.IsBot then
                     local p = Players:GetPlayerByUserId(d.UserId)
-                    if p then TeleportToLobby(p) end
+                    if p then
+                        CashAndWalletManager.SettlePlayerGameCash(p, "Eliminated")
+                        TeleportToLobby(p)
+                    end
                 elseif d.Character then
                     d.Character:Destroy()
                 end
@@ -1237,14 +1491,17 @@ BidSubmitted.OnServerEvent:Connect(function(player, amount)
             return -- Only first valid bid is accepted
         end
         local bid = tonumber(amount)
-        if not bid or bid ~= bid or bid < 0 or bid > data.Money then
+        if not bid or bid ~= bid or bid < 0 then
             return
         end
-        bid = math.floor(bid * 100) / 100
-        data.CurrentBid = bid
+        local ok, actualBid = CashAndWalletManager.TrySpendFromWallet(player, bid)
+        if not ok then return end
+        data.CurrentBid = actualBid
+        data.Money = player:GetAttribute("Wallet") or (data.Money - actualBid)
+        data.Wallet = data.Money
         local elapsed = math.max(0.01, os.clock() - PhaseStartTime)
         data.SubmitTime = math.floor(elapsed * 100) / 100
-        print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs", player.Name, data.CurrentBid, data.SubmitTime))
+        print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs (Wallet remaining: $%d)", player.Name, data.CurrentBid, data.SubmitTime, player:GetAttribute("Wallet") or 0))
     else
         warn(string.format("[SECURITY] Rejected bid from inactive/AFK player %s", player.Name))
     end
@@ -1310,7 +1567,8 @@ local function InitPlayer(player)
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
-            Money = GameConfig.StartingMoney,
+            Money = 0,
+            Wallet = 0,
             Health = GameConfig.MaxHealth,
             IsAlive = true,
             IsAFK = false, -- Default OFF as requested
@@ -1320,6 +1578,7 @@ local function InitPlayer(player)
             IsBot = false,
             Character = player.Character
         }
+        player:SetAttribute("IsInGame", false)
     end
     player.CharacterAdded:Connect(function(char)
         task.wait(0.5)
@@ -1331,6 +1590,7 @@ local function InitPlayer(player)
             data.Health = 0
             data.IsAlive = false
             data.ParticipationState = "Eliminated"
+            CashAndWalletManager.SettlePlayerGameCash(player, "Eliminated")
             SyncStats(player)
             TeleportToLobby(player)
         end
@@ -1352,23 +1612,6 @@ Players.PlayerAdded:Connect(InitPlayer)
 Players.PlayerRemoving:Connect(function(player)
     PlayerData[player.UserId] = nil
 end)
-
-local function GetReadyEligiblePlayers()
-    local ready = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        local data = PlayerData[player.UserId]
-        local isAfk = player:GetAttribute("IsAFK") or (data and data.IsAFK)
-        local isClientReady = player:GetAttribute("ClientReady") == true
-        local char = player.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        local isR6 = hum and hum.RigType == Enum.HumanoidRigType.R6
-        local isLiving = hum and hum.Health > 0
-        if not isAfk and isClientReady and isR6 and isLiving then
-            table.insert(ready, player)
-        end
-    end
-    return ready
-end
 
 -- Main Server Lifecycle Loop
 task.spawn(function()
@@ -1408,7 +1651,7 @@ end)
 ]]></string>
       </Properties>
     </Item>
-    <Item class="ModuleScript" referent="8">
+    <Item class="ModuleScript" referent="9">
       <Properties>
         <string name="Name">RuinsDoorHandManager</string>
         <string name="Source"><![CDATA[--!strict
@@ -1717,7 +1960,7 @@ local function getPlayerBettingData(player: Player, customDataMap: any?)
 		local uid = player.UserId
 		local d = customDataMap[uid] or customDataMap[player]
 		if d then
-			return d.Money or d.Wallet or 0, d.CurrentBid or d.Bid or 0, d.SubmitTime or d.BetTime or 10.0, d.LostBet
+			return d.Wallet or d.Money or 0, d.CurrentBid or d.Bid or 0, d.SubmitTime or d.BetTime or 10.0, d.LostBet
 		end
 	end
 
@@ -2322,7 +2565,7 @@ return RuinsDoorHandManager
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="9">
+    <Item class="Script" referent="10">
       <Properties>
         <string name="Name">SpawnAndAFKManager</string>
         <token name="RunContext">0</token>
@@ -2536,22 +2779,22 @@ print("[SpawnAndAFKManager] Initialized successfully.")
       </Properties>
     </Item>
   </Item>
-  <Item class="SoundService" referent="10">
+  <Item class="SoundService" referent="11">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="11">
+  <Item class="StarterGui" referent="12">
     <Properties>
       <string name="Name">StarterGui</string>
     </Properties>
-    <Item class="ScreenGui" referent="12">
+    <Item class="ScreenGui" referent="13">
       <Properties>
         <string name="Name">BidToSurviveUI</string>
         <bool name="ResetOnSpawn">false</bool>
       </Properties>
-      <Item class="LocalScript" referent="13">
+      <Item class="LocalScript" referent="14">
         <Properties>
           <string name="Name">ClientUIController</string>
           <string name="Source"><![CDATA[-- ClientUIController: Handles all BID TO SURVIVE UI interactions, Hammer Roulette, HUD, and 4-Column Leaderboard
@@ -2846,8 +3089,9 @@ if oldCardStroke then oldCardStroke:Destroy() end
 local oldCardCorner = statsCard:FindFirstChildOfClass("UICorner")
 if oldCardCorner then oldCardCorner:Destroy() end
 
+local initialInGame = (player:GetAttribute("IsInGame") == true)
 statsCard.Size = UDim2.new(0, 260, 0, 24)
-statsCard.Position = UDim2.new(0, 24, 1, -154)
+statsCard.Position = UDim2.new(0, 24, 1, initialInGame and -108 or -66)
 
 -- Hide duplicate cash box & health bar (rendered by unified MovementDiveAndHUDClient)
 cashLabel.Visible = false
@@ -2873,7 +3117,7 @@ end
 local afkButton = gui:FindFirstChild("AFKButton") or Instance.new("TextButton")
 afkButton.Name = "AFKButton"
 afkButton.Size = UDim2.new(0, 96, 0, 26)
-afkButton.Position = UDim2.new(0, 24, 1, -188)
+afkButton.Position = UDim2.new(0, 24, 1, initialInGame and -142 or -100)
 afkButton.Font = Enum.Font.GothamBold
 afkButton.TextSize = 12
 afkButton.ZIndex = 20
@@ -2903,6 +3147,22 @@ end
 
 UpdateAFKVisual()
 afkButton.Parent = gui
+
+local function UpdateHUDLayout()
+    local inGame = (player:GetAttribute("IsInGame") == true)
+    local statsTargetY = inGame and -108 or -66
+    local afkTargetY = inGame and -142 or -100
+
+    TweenService:Create(statsCard, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0, 24, 1, statsTargetY)
+    }):Play()
+    TweenService:Create(afkButton, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0, 24, 1, afkTargetY)
+    }):Play()
+end
+
+UpdateHUDLayout()
+player:GetAttributeChangedSignal("IsInGame"):Connect(UpdateHUDLayout)
 
 afkButton.MouseButton1Click:Connect(function()
     IsAFK = not IsAFK
@@ -3317,7 +3577,8 @@ PromptBid.OnClientEvent:Connect(function(data)
 end)
 
 local function setBidFraction(frac)
-    local amt = math.floor((CurrentMoney * frac) * 100) / 100
+    local wallet = player:GetAttribute("Wallet") or CurrentMoney
+    local amt = math.floor((wallet * frac) * 100) / 100
     bidInput.Text = string.format("%.2f", amt)
 end
 
@@ -3335,8 +3596,9 @@ end
 
 submitBtn.MouseButton1Click:Connect(function()
     if HasSubmitted or not IsActiveInRound() then return end
+    local wallet = player:GetAttribute("Wallet") or CurrentMoney
     local val = tonumber(bidInput.Text) or 0
-    val = math.clamp(val, 0, CurrentMoney)
+    val = math.clamp(val, 0, wallet)
     val = math.floor(val * 100) / 100
     
     HasSubmitted = true
@@ -3689,15 +3951,15 @@ end)
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="14">
+  <Item class="StarterPlayer" referent="15">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterCharacterScripts" referent="15">
+    <Item class="StarterCharacterScripts" referent="16">
       <Properties>
         <string name="Name">StarterCharacterScripts</string>
       </Properties>
-      <Item class="Script" referent="16">
+      <Item class="Script" referent="17">
         <Properties>
           <string name="Name">Health</string>
           <token name="RunContext">0</token>
@@ -3712,11 +3974,11 @@ end)
         </Properties>
       </Item>
     </Item>
-    <Item class="StarterPlayerScripts" referent="17">
+    <Item class="StarterPlayerScripts" referent="18">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="18">
+      <Item class="LocalScript" referent="19">
         <Properties>
           <string name="Name">GorillaImpactClient</string>
           <string name="Source"><![CDATA[--!strict
@@ -4079,7 +4341,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="19">
+      <Item class="LocalScript" referent="20">
         <Properties>
           <string name="Name">MovementDiveAndHUDClient</string>
           <string name="Source"><![CDATA[--!strict
@@ -4164,8 +4426,10 @@ local diveTrack: AnimationTrack? = nil
 local healthConn: RBXScriptConnection? = nil
 
 -- ============================================================================
--- 2. UNIFIED MONEY, HP & WHITE ENERGY HUD BUILDER
+-- 2. UNIFIED HP, ENERGY & DYNAMIC LOBBY/GAME CURRENCY HUD BUILDER
 -- ============================================================================
+local PayoutRemote: RemoteEvent? = (ReplicatedStorage:FindFirstChild("CashPayoutEvent") :: any)
+
 local function createOrUpdateStatusHUD()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local existing = playerGui:FindFirstChild("BidToSurviveStatusHUD")
@@ -4177,20 +4441,22 @@ local function createOrUpdateStatusHUD()
 	screenGui.IgnoreGuiInset = true
 	screenGui.Parent = playerGui
 
-	-- Unified Bottom-Left Container for Money, HP, and White Energy Bar
-	local container = Instance.new("Frame")
-	container.Name = "StatusStack"
-	container.AnchorPoint = Vector2.new(0, 1)
-	container.Position = UDim2.new(0, 24, 1, -24)
-	container.Size = UDim2.new(0, 260, 0, 118)
-	container.BackgroundTransparency = 1
-	container.Parent = screenGui
+	-- ========================================================================
+	-- A) BOTTOM-LEFT STACK: Strictly HP (Red) & ENERGY (Pure White)
+	-- ========================================================================
+	local statusStack = Instance.new("Frame")
+	statusStack.Name = "BottomLeftStatusStack"
+	statusStack.AnchorPoint = Vector2.new(0, 1)
+	statusStack.Position = UDim2.new(0, 24, 1, -24)
+	statusStack.Size = UDim2.new(0, 260, 0, 74)
+	statusStack.BackgroundTransparency = 1
+	statusStack.Parent = screenGui
 
 	local listLayout = Instance.new("UIListLayout")
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	listLayout.Padding = UDim.new(0, 8)
 	listLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-	listLayout.Parent = container
+	listLayout.Parent = statusStack
 
 	local function createThemedBar(order: number, name: string, labelText: string, fillColor: Color3)
 		local bg = Instance.new("Frame")
@@ -4199,7 +4465,7 @@ local function createOrUpdateStatusHUD()
 		bg.Size = UDim2.new(1, 0, 0, 32)
 		bg.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
 		bg.BackgroundTransparency = 0.15
-		bg.Parent = container
+		bg.Parent = statusStack
 
 		local corner = Instance.new("UICorner")
 		corner.CornerRadius = UDim.new(0, 8)
@@ -4221,6 +4487,7 @@ local function createOrUpdateStatusHUD()
 		fillCorner.CornerRadius = UDim.new(0, 8)
 		fillCorner.Parent = fill
 
+		local isWhite = (fillColor == Color3.fromRGB(255, 255, 255))
 		local label = Instance.new("TextLabel")
 		label.Name = "ValueLabel"
 		label.Size = UDim2.new(1, -20, 1, 0)
@@ -4229,10 +4496,8 @@ local function createOrUpdateStatusHUD()
 		label.Font = Enum.Font.GothamBold
 		label.TextSize = 14
 		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.TextColor3 = (fillColor == Color3.fromRGB(255, 255, 255))
-			and Color3.fromRGB(30, 35, 45)
-			or Color3.fromRGB(255, 255, 255)
-		label.TextStrokeTransparency = (fillColor == Color3.fromRGB(255, 255, 255)) and 0.85 or 0.35
+		label.TextColor3 = isWhite and Color3.fromRGB(25, 30, 40) or Color3.fromRGB(255, 255, 255)
+		label.TextStrokeTransparency = isWhite and 0.85 or 0.35
 		label.Text = labelText
 		label.ZIndex = 2
 		label.Parent = bg
@@ -4240,20 +4505,141 @@ local function createOrUpdateStatusHUD()
 		return bg, fill, label
 	end
 
-	-- 1) Money Bar (Aligned directly above HP & Energy in the same theme)
-	local _, moneyFill, moneyLabel = createThemedBar(1, "Money", "WALLET: $0.00", Color3.fromRGB(46, 175, 95))
-	moneyFill.Size = UDim2.new(1, 0, 1, 0)
+	local hpBg, hpFill, hpLabel = createThemedBar(1, "HP", "HP: 100 / 100", Color3.fromRGB(235, 55, 65))
+	local _, energyFill, energyLabel = createThemedBar(2, "Energy", "ENERGY: 100%", Color3.fromRGB(255, 255, 255))
 
-	-- 2) HP Bar (Crimson Red)
-	local _, hpFill, hpLabel = createThemedBar(2, "HP", "HP: 100 / 100", Color3.fromRGB(235, 55, 65))
+	-- ========================================================================
+	-- B) LEFT-SIDE LOBBY CASH CARD (Overall Inventory Money from All Games)
+	-- Visible when in Lobby (IsInGame == false)
+	-- ========================================================================
+	local lobbyCashCard = Instance.new("Frame")
+	lobbyCashCard.Name = "LobbyOverallCashCard"
+	lobbyCashCard.AnchorPoint = Vector2.new(0, 0.5)
+	lobbyCashCard.Position = UDim2.new(0, 24, 0.48, 0)
+	lobbyCashCard.Size = UDim2.new(0, 235, 0, 70)
+	lobbyCashCard.BackgroundColor3 = Color3.fromRGB(18, 21, 30)
+	lobbyCashCard.BackgroundTransparency = 0.12
+	lobbyCashCard.ClipsDescendants = false
+	lobbyCashCard.Parent = screenGui
 
-	-- 3) Energy Bar (Pure White #FFFFFF)
-	local _, energyFill, energyLabel = createThemedBar(3, "Energy", "ENERGY: 100%", Color3.fromRGB(255, 255, 255))
+	local lcCorner = Instance.new("UICorner")
+	lcCorner.CornerRadius = UDim.new(0, 12)
+	lcCorner.Parent = lobbyCashCard
 
-	return moneyLabel, hpFill, hpLabel, energyFill, energyLabel
+	local lcStroke = Instance.new("UIStroke")
+	lcStroke.Color = Color3.fromRGB(245, 158, 11) -- Gold/Amber Inventory Accent
+	lcStroke.Thickness = 1.8
+	lcStroke.Parent = lobbyCashCard
+
+	local lcGradient = Instance.new("UIGradient")
+	lcGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 28, 40)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(14, 16, 24)),
+	})
+	lcGradient.Rotation = 45
+	lcGradient.Parent = lobbyCashCard
+
+	local lcTitle = Instance.new("TextLabel")
+	lcTitle.Size = UDim2.new(1, -24, 0, 18)
+	lcTitle.Position = UDim2.new(0, 12, 0, 10)
+	lcTitle.BackgroundTransparency = 1
+	lcTitle.Font = Enum.Font.GothamBold
+	lcTitle.TextSize = 11
+	lcTitle.TextXAlignment = Enum.TextXAlignment.Left
+	lcTitle.TextColor3 = Color3.fromRGB(148, 163, 184)
+	lcTitle.Text = "TOTAL EARNED CASH"
+	lcTitle.Parent = lobbyCashCard
+
+	local lobbyCashLabel = Instance.new("TextLabel")
+	lobbyCashLabel.Name = "AmountLabel"
+	lobbyCashLabel.Size = UDim2.new(1, -24, 0, 34)
+	lobbyCashLabel.Position = UDim2.new(0, 12, 0, 28)
+	lobbyCashLabel.BackgroundTransparency = 1
+	lobbyCashLabel.Font = Enum.Font.GothamBlack
+	lobbyCashLabel.TextSize = 26
+	lobbyCashLabel.TextXAlignment = Enum.TextXAlignment.Left
+	lobbyCashLabel.TextColor3 = Color3.fromRGB(251, 191, 36)
+	lobbyCashLabel.Text = "$0"
+	lobbyCashLabel.Parent = lobbyCashCard
+
+	-- Floating Payout Toast right above Lobby Cash Card ("+$600 (30s * $20)")
+	local payoutToast = Instance.new("TextLabel")
+	payoutToast.Name = "PayoutToast"
+	payoutToast.Size = UDim2.new(1, 40, 0, 24)
+	payoutToast.Position = UDim2.new(0, 0, 0, -32)
+	payoutToast.BackgroundTransparency = 1
+	payoutToast.Font = Enum.Font.GothamBlack
+	payoutToast.TextSize = 14
+	payoutToast.TextXAlignment = Enum.TextXAlignment.Left
+	payoutToast.TextColor3 = Color3.fromRGB(52, 211, 153)
+	payoutToast.TextStrokeTransparency = 0.2
+	payoutToast.TextTransparency = 1
+	payoutToast.Text = ""
+	payoutToast.Parent = lobbyCashCard
+
+	-- ========================================================================
+	-- C) BOTTOM-RIGHT IN-GAME WALLET CARD ($20 Starting Match Wallet)
+	-- Visible ONLY when In-Game (IsInGame == true)
+	-- ========================================================================
+	local gameWalletCard = Instance.new("Frame")
+	gameWalletCard.Name = "InGameWalletCard"
+	gameWalletCard.AnchorPoint = Vector2.new(1, 1)
+	gameWalletCard.Position = UDim2.new(1, -24, 1, -24)
+	gameWalletCard.Size = UDim2.new(0, 215, 0, 64)
+	gameWalletCard.BackgroundColor3 = Color3.fromRGB(16, 22, 28)
+	gameWalletCard.BackgroundTransparency = 0.12
+	gameWalletCard.Visible = false
+	gameWalletCard.Parent = screenGui
+
+	local gwCorner = Instance.new("UICorner")
+	gwCorner.CornerRadius = UDim.new(0, 12)
+	gwCorner.Parent = gameWalletCard
+
+	local gwStroke = Instance.new("UIStroke")
+	gwStroke.Color = Color3.fromRGB(52, 211, 153) -- Crisp Emerald Wallet Border
+	gwStroke.Thickness = 1.8
+	gwStroke.Parent = gameWalletCard
+
+	local gwScale = Instance.new("UIScale")
+	gwScale.Scale = 1.0
+	gwScale.Parent = gameWalletCard
+
+	local gwGradient = Instance.new("UIGradient")
+	gwGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 28, 34)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 16, 22)),
+	})
+	gwGradient.Rotation = 45
+	gwGradient.Parent = gameWalletCard
+
+	local gwTitle = Instance.new("TextLabel")
+	gwTitle.Size = UDim2.new(1, -24, 0, 18)
+	gwTitle.Position = UDim2.new(0, 12, 0, 8)
+	gwTitle.BackgroundTransparency = 1
+	gwTitle.Font = Enum.Font.GothamBold
+	gwTitle.TextSize = 11
+	gwTitle.TextXAlignment = Enum.TextXAlignment.Right
+	gwTitle.TextColor3 = Color3.fromRGB(167, 243, 208)
+	gwTitle.Text = "ROUND WALLET"
+	gwTitle.Parent = gameWalletCard
+
+	local gameWalletLabel = Instance.new("TextLabel")
+	gameWalletLabel.Name = "WalletAmount"
+	gameWalletLabel.Size = UDim2.new(1, -24, 0, 32)
+	gameWalletLabel.Position = UDim2.new(0, 12, 0, 26)
+	gameWalletLabel.BackgroundTransparency = 1
+	gameWalletLabel.Font = Enum.Font.GothamBlack
+	gameWalletLabel.TextSize = 26
+	gameWalletLabel.TextXAlignment = Enum.TextXAlignment.Right
+	gameWalletLabel.TextColor3 = Color3.fromRGB(52, 211, 153)
+	gameWalletLabel.Text = "$20"
+	gameWalletLabel.Parent = gameWalletCard
+
+	return hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lobbyCashCard, lobbyCashLabel, payoutToast, gameWalletCard, gameWalletLabel, gwScale
 end
 
-local moneyLabel, hpFill, hpLabel, energyFill, energyLabel = createOrUpdateStatusHUD()
+local hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lobbyCashCard, lobbyCashLabel, payoutToast, gameWalletCard, gameWalletLabel, gwScale =
+	createOrUpdateStatusHUD()
 
 local function updateHPDisplay(health: number, maxHealth: number)
 	local safeMax = (maxHealth > 0) and maxHealth or 100
@@ -4264,22 +4650,120 @@ local function updateHPDisplay(health: number, maxHealth: number)
 	}):Play()
 end
 
-local function updateMoneyDisplay(explicitVal: number?)
-	local moneyVal = explicitVal
-	if moneyVal == nil then
-		local ls = player:FindFirstChild("leaderstats")
-		local walletObj = ls and (ls:FindFirstChild("Wallet") or ls:FindFirstChild("Money") or ls:FindFirstChild("Cash"))
-		local attrVal = player:GetAttribute("Wallet") or player:GetAttribute("Money")
-		moneyVal = (typeof(attrVal) == "number" and attrVal)
-			or (walletObj and typeof(walletObj.Value) == "number" and walletObj.Value)
-			or 0
-	end
-	moneyLabel.Text = string.format("WALLET: $%.2f", tonumber(moneyVal) or 0)
+local displayedOverallCash = 0
+local countUpThread: thread? = nil
+local lastWalletVal = 20
+
+local function animateWalletScalePunch()
+	gwScale.Scale = 1.08
+	TweenService:Create(gwScale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Scale = 1.0
+	}):Play()
 end
 
+local function rollOverallCash(targetCash: number)
+	if countUpThread then
+		task.cancel(countUpThread)
+		countUpThread = nil
+	end
+
+	local startVal = displayedOverallCash
+	local diff = targetCash - startVal
+	if math.abs(diff) <= 0.01 then
+		displayedOverallCash = targetCash
+		lobbyCashLabel.Text = string.format("$%d", math.floor(targetCash))
+		return
+	end
+
+	countUpThread = task.spawn(function()
+		local duration = 1.2
+		local startTime = os.clock()
+		while true do
+			local elapsed = os.clock() - startTime
+			local progress = math.clamp(elapsed / duration, 0, 1)
+			local alpha = TweenService:GetValue(progress, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+			local cur = math.floor(startVal + (diff * alpha))
+			displayedOverallCash = cur
+			lobbyCashLabel.Text = string.format("$%d", cur)
+			if progress >= 1 then break end
+			task.wait(0.03)
+		end
+		displayedOverallCash = targetCash
+		lobbyCashLabel.Text = string.format("$%d", math.floor(targetCash))
+		countUpThread = nil
+	end)
+end
+
+local function updateCurrencyUI()
+	local isInGame = (player:GetAttribute("IsInGame") == true)
+	local overallCash = player:GetAttribute("OverallCash") or 0
+	local matchWallet = player:GetAttribute("Wallet") or 20
+
+	-- In Spawn Lobby, hide HP UI completely; only display during active in-game match
+	hpBg.Visible = isInGame
+	statusStack.Size = isInGame and UDim2.new(0, 260, 0, 74) or UDim2.new(0, 260, 0, 32)
+
+	-- In-Game Wallet updates
+	if matchWallet ~= lastWalletVal then
+		if matchWallet < lastWalletVal and isInGame then
+			animateWalletScalePunch()
+		end
+		lastWalletVal = matchWallet
+	end
+	gameWalletLabel.Text = string.format("$%d", math.floor(matchWallet))
+
+	-- Lobby Cash Display
+	if countUpThread == nil then
+		displayedOverallCash = overallCash
+		lobbyCashLabel.Text = string.format("$%d", math.floor(overallCash))
+	end
+
+	-- Slide In / Slide Out transitions
+	if isInGame then
+		-- Entering Game: Slide Lobby Cash left, Slide Wallet in from right
+		gameWalletCard.Visible = true
+		TweenService:Create(gameWalletCard, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+			Position = UDim2.new(1, -24, 1, -24)
+		}):Play()
+
+		local lobbyOut = TweenService:Create(lobbyCashCard, TweenInfo.new(0.30, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+			Position = UDim2.new(0, -280, 0.48, 0)
+		})
+		lobbyOut:Play()
+		lobbyOut.Completed:Once(function()
+			if player:GetAttribute("IsInGame") == true then
+				lobbyCashCard.Visible = false
+			end
+		end)
+	else
+		-- Returning to Lobby: Slide Wallet out to right, Slide Lobby Cash in from left
+		lobbyCashCard.Visible = true
+		TweenService:Create(lobbyCashCard, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0, 24, 0.48, 0)
+		}):Play()
+
+		local walletOut = TweenService:Create(gameWalletCard, TweenInfo.new(0.30, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+			Position = UDim2.new(1, 280, 1, -24)
+		})
+		walletOut:Play()
+		walletOut.Completed:Once(function()
+			if player:GetAttribute("IsInGame") ~= true then
+				gameWalletCard.Visible = false
+			end
+		end)
+	end
+end
+
+-- Backward compatibility alias
+local function updateMoneyDisplay()
+	updateCurrencyUI()
+end
+
+updateCurrencyUI()
+
 player.AttributeChanged:Connect(function(attr)
-	if attr == "Wallet" or attr == "Money" then
-		updateMoneyDisplay()
+	if attr == "OverallCash" or attr == "Wallet" or attr == "IsInGame" or attr == "Money" then
+		updateCurrencyUI()
 	elseif attr == "HP" or attr == "Health" then
 		local h = player:GetAttribute(attr)
 		if typeof(h) == "number" and activeHum then
@@ -4288,12 +4772,41 @@ player.AttributeChanged:Connect(function(attr)
 	end
 end)
 
+local function handlePayout(earnedCash: number, secondsSurvived: number, newOverall: number)
+	updateCurrencyUI()
+	rollOverallCash(newOverall)
+
+	payoutToast.Text = string.format("+$%d (%ds Survived × $20)", earnedCash, secondsSurvived)
+	payoutToast.Position = UDim2.new(0, 0, 0, -18)
+	payoutToast.TextTransparency = 0
+
+	TweenService:Create(payoutToast, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Position = UDim2.new(0, 0, 0, -32)
+	}):Play()
+
+	task.delay(4.0, function()
+		TweenService:Create(payoutToast, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			TextTransparency = 1
+		}):Play()
+	end)
+end
+
+if PayoutRemote then
+	PayoutRemote.OnClientEvent:Connect(handlePayout)
+else
+	task.spawn(function()
+		local remote = ReplicatedStorage:WaitForChild("CashPayoutEvent", 15) :: RemoteEvent?
+		if remote then
+			PayoutRemote = remote
+			remote.OnClientEvent:Connect(handlePayout)
+		end
+	end)
+end
+
 if StatsUpdated then
 	StatsUpdated.OnClientEvent:Connect(function(stats)
 		if stats then
-			if stats.Money ~= nil then
-				updateMoneyDisplay(stats.Money)
-			end
+			updateCurrencyUI()
 			if stats.Health ~= nil and activeHum then
 				updateHPDisplay(stats.Health, activeHum.MaxHealth)
 			end
@@ -4754,7 +5267,7 @@ print("[MovementDiveAndHUDClient] Initialized: Walk (90697464892050), Run (12575
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="20">
+      <Item class="LocalScript" referent="21">
         <Properties>
           <string name="Name">RuinsImpactClient</string>
           <string name="Source"><![CDATA[--!strict
@@ -5191,13 +5704,13 @@ print("[RuinsImpactClient] Loaded and listening for RuinsHandImpactEvent, RuinsP
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="21">
+  <Item class="Workspace" referent="22">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Part" referent="22">
+    <Item class="Part" referent="23">
       <Properties>
         <string name="Name">Baseplate</string>
         <bool name="Anchored">true</bool>

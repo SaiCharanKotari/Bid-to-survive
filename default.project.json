@@ -27,6 +27,9 @@
       "RuinsDoorHandManager": {
         "$path": "src/server/RuinsDoorHandManager.luau"
       },
+      "CashAndWalletManager": {
+        "$path": "src/server/CashAndWalletManager.luau"
+      },
       "R6AvatarManager": {
         "$path": "src/server/R6AvatarManager.server.luau"
       }
@@ -58,6 +61,9 @@
         },
         "GorillaImpactClient": {
           "$path": "src/client/GorillaImpactClient.client.luau"
+        },
+        "GlobalButtonAndSVG3UI": {
+          "$path": "src/client/GlobalButtonAndSVG3UI.client.luau"
         }
       },
       "StarterCharacterScripts": {

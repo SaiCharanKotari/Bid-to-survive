@@ -80,8 +80,10 @@ local diveTrack: AnimationTrack? = nil
 local healthConn: RBXScriptConnection? = nil
 
 -- ============================================================================
--- 2. UNIFIED MONEY, HP & WHITE ENERGY HUD BUILDER
+-- 2. UNIFIED HP, ENERGY & DYNAMIC LOBBY/GAME CURRENCY HUD BUILDER
 -- ============================================================================
+local PayoutRemote: RemoteEvent? = (ReplicatedStorage:FindFirstChild("CashPayoutEvent") :: any)
+
 local function createOrUpdateStatusHUD()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local existing = playerGui:FindFirstChild("BidToSurviveStatusHUD")
@@ -93,37 +95,40 @@ local function createOrUpdateStatusHUD()
 	screenGui.IgnoreGuiInset = true
 	screenGui.Parent = playerGui
 
-	-- Unified Bottom-Left Container for Money, HP, and White Energy Bar
-	local container = Instance.new("Frame")
-	container.Name = "StatusStack"
-	container.AnchorPoint = Vector2.new(0, 1)
-	container.Position = UDim2.new(0, 24, 1, -24)
-	container.Size = UDim2.new(0, 260, 0, 118)
-	container.BackgroundTransparency = 1
-	container.Parent = screenGui
+	-- ========================================================================
+	-- COMIC POP-ART STATUS STACK: Money (+20023 $), HP (Red), and EP (Cyan)
+	-- ========================================================================
+	local statusStack = Instance.new("Frame")
+	statusStack.Name = "BottomLeftStatusStack"
+	statusStack.AnchorPoint = Vector2.new(0, 1)
+	statusStack.Position = UDim2.new(0, 24, 1, -24)
+	statusStack.Size = UDim2.new(0, 340, 0, 156)
+	statusStack.BackgroundTransparency = 1
+	statusStack.Parent = screenGui
 
 	local listLayout = Instance.new("UIListLayout")
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	listLayout.Padding = UDim.new(0, 8)
+	listLayout.Padding = UDim.new(0, 10)
 	listLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-	listLayout.Parent = container
+	listLayout.Parent = statusStack
 
-	local function createThemedBar(order: number, name: string, labelText: string, fillColor: Color3)
+	local function createComicBar(order: number, name: string, tagText: string, fillColor: Color3, underlayColor: Color3)
 		local bg = Instance.new("Frame")
 		bg.Name = name .. "Frame"
 		bg.LayoutOrder = order
-		bg.Size = UDim2.new(1, 0, 0, 32)
-		bg.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
-		bg.BackgroundTransparency = 0.15
-		bg.Parent = container
+		bg.Size = UDim2.new(1, 0, 0, 48)
+		bg.BackgroundColor3 = underlayColor
+		bg.BorderSizePixel = 0
+		bg.Parent = statusStack
 
 		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 8)
+		corner.CornerRadius = UDim.new(0, 4)
 		corner.Parent = bg
 
 		local stroke = Instance.new("UIStroke")
-		stroke.Color = Color3.fromRGB(55, 60, 75)
-		stroke.Thickness = 1.5
+		stroke.Color = Color3.fromRGB(0, 0, 0)
+		stroke.Thickness = 3
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		stroke.Parent = bg
 
 		local fill = Instance.new("Frame")
@@ -134,68 +139,200 @@ local function createOrUpdateStatusHUD()
 		fill.Parent = bg
 
 		local fillCorner = Instance.new("UICorner")
-		fillCorner.CornerRadius = UDim.new(0, 8)
+		fillCorner.CornerRadius = UDim.new(0, 4)
 		fillCorner.Parent = fill
 
-		local label = Instance.new("TextLabel")
-		label.Name = "ValueLabel"
-		label.Size = UDim2.new(1, -20, 1, 0)
-		label.Position = UDim2.new(0, 10, 0, 0)
-		label.BackgroundTransparency = 1
-		label.Font = Enum.Font.GothamBold
-		label.TextSize = 14
-		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.TextColor3 = (fillColor == Color3.fromRGB(255, 255, 255))
-			and Color3.fromRGB(30, 35, 45)
-			or Color3.fromRGB(255, 255, 255)
-		label.TextStrokeTransparency = (fillColor == Color3.fromRGB(255, 255, 255)) and 0.85 or 0.35
-		label.Text = labelText
-		label.ZIndex = 2
-		label.Parent = bg
+		-- Left Label (e.g. "HP" or "EP")
+		local tagLabel = Instance.new("TextLabel")
+		tagLabel.Name = "TagLabel"
+		tagLabel.Size = UDim2.new(0, 48, 1, 0)
+		tagLabel.Position = UDim2.new(0, 14, 0.5, 0)
+		tagLabel.AnchorPoint = Vector2.new(0, 0.5)
+		tagLabel.BackgroundTransparency = 1
+		tagLabel.Font = Enum.Font.GothamBlack
+		tagLabel.TextSize = 22
+		tagLabel.TextXAlignment = Enum.TextXAlignment.Left
+		tagLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		tagLabel.Text = tagText
+		tagLabel.ZIndex = 3
+		tagLabel.Parent = bg
 
-		return bg, fill, label
+		local tagStroke = Instance.new("UIStroke")
+		tagStroke.Thickness = 2.5
+		tagStroke.Color = Color3.fromRGB(0, 0, 0)
+		tagStroke.Parent = tagLabel
+
+		-- Right Numeric Value Label (e.g. "100")
+		local valLabel = Instance.new("TextLabel")
+		valLabel.Name = "ValueLabel"
+		valLabel.Size = UDim2.new(0, 80, 1, 0)
+		valLabel.Position = UDim2.new(1, -14, 0.5, 0)
+		valLabel.AnchorPoint = Vector2.new(1, 0.5)
+		valLabel.BackgroundTransparency = 1
+		valLabel.Font = Enum.Font.GothamBlack
+		valLabel.TextSize = 22
+		valLabel.TextXAlignment = Enum.TextXAlignment.Right
+		valLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		valLabel.Text = "100"
+		valLabel.ZIndex = 3
+		valLabel.Parent = bg
+
+		local valStroke = Instance.new("UIStroke")
+		valStroke.Thickness = 2.5
+		valStroke.Color = Color3.fromRGB(0, 0, 0)
+		valStroke.Parent = valLabel
+
+		return bg, fill, valLabel
 	end
 
-	-- 1) Money Bar (Aligned directly above HP & Energy in the same theme)
-	local _, moneyFill, moneyLabel = createThemedBar(1, "Money", "WALLET: $0.00", Color3.fromRGB(46, 175, 95))
-	moneyFill.Size = UDim2.new(1, 0, 1, 0)
+	-- Red HP Bar (#FF0000 with 3px black stroke, white HP & number)
+	local hpBg, hpFill, hpLabel = createComicBar(2, "HP", "HP", Color3.fromRGB(255, 0, 0), Color3.fromRGB(60, 10, 15))
+	-- Cyan EP Bar (#00FFF2 with 3px black stroke, white EP & number)
+	local _, energyFill, energyLabel = createComicBar(3, "Energy", "EP", Color3.fromRGB(0, 255, 242), Color3.fromRGB(10, 45, 50))
 
-	-- 2) HP Bar (Crimson Red)
-	local _, hpFill, hpLabel = createThemedBar(2, "HP", "HP: 100 / 100", Color3.fromRGB(235, 55, 65))
+	-- Comic Green Money Frame (+20023 $)
+	local moneyFrame = Instance.new("Frame")
+	moneyFrame.Name = "MoneyDisplayFrame"
+	moneyFrame.LayoutOrder = 1
+	moneyFrame.Size = UDim2.new(1, 0, 0, 36)
+	moneyFrame.BackgroundTransparency = 1
+	moneyFrame.Parent = statusStack
 
-	-- 3) Energy Bar (Pure White #FFFFFF)
-	local _, energyFill, energyLabel = createThemedBar(3, "Energy", "ENERGY: 100%", Color3.fromRGB(255, 255, 255))
+	local moneyLabel = Instance.new("TextLabel")
+	moneyLabel.Name = "MoneyLabel"
+	moneyLabel.Size = UDim2.new(1, 0, 1, 0)
+	moneyLabel.Position = UDim2.new(0, 2, 0, 0)
+	moneyLabel.BackgroundTransparency = 1
+	moneyLabel.Font = Enum.Font.GothamBlack
+	moneyLabel.TextSize = 30
+	moneyLabel.TextXAlignment = Enum.TextXAlignment.Left
+	moneyLabel.TextColor3 = Color3.fromRGB(0, 230, 0) -- Lime green #00E600
+	moneyLabel.Text = "+0 $"
+	moneyLabel.ZIndex = 3
+	moneyLabel.Parent = moneyFrame
 
-	return moneyLabel, hpFill, hpLabel, energyFill, energyLabel
+	local moneyStroke = Instance.new("UIStroke")
+	moneyStroke.Thickness = 3.5
+	moneyStroke.Color = Color3.fromRGB(0, 0, 0)
+	moneyStroke.Parent = moneyLabel
+
+	local gwScale = Instance.new("UIScale")
+	gwScale.Scale = 1.0
+	gwScale.Parent = moneyLabel
+
+	-- Floating Payout Toast
+	local payoutToast = Instance.new("TextLabel")
+	payoutToast.Name = "PayoutToast"
+	payoutToast.Size = UDim2.new(1, 40, 0, 24)
+	payoutToast.Position = UDim2.new(0, 0, 0, -28)
+	payoutToast.BackgroundTransparency = 1
+	payoutToast.Font = Enum.Font.GothamBlack
+	payoutToast.TextSize = 16
+	payoutToast.TextXAlignment = Enum.TextXAlignment.Left
+	payoutToast.TextColor3 = Color3.fromRGB(52, 211, 153)
+	payoutToast.TextStrokeTransparency = 0.2
+	payoutToast.TextTransparency = 1
+	payoutToast.Text = ""
+	payoutToast.Parent = moneyFrame
+
+	local dummyCard = Instance.new("Frame")
+	dummyCard.Visible = false
+	dummyCard.Parent = screenGui
+
+	return hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, dummyCard, moneyLabel, payoutToast, dummyCard, moneyLabel, gwScale
 end
 
-local moneyLabel, hpFill, hpLabel, energyFill, energyLabel = createOrUpdateStatusHUD()
+local hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lobbyCashCard, lobbyCashLabel, payoutToast, gameWalletCard, gameWalletLabel, gwScale =
+	createOrUpdateStatusHUD()
 
 local function updateHPDisplay(health: number, maxHealth: number)
 	local safeMax = (maxHealth > 0) and maxHealth or 100
 	local ratio = math.clamp(health / safeMax, 0, 1)
-	hpLabel.Text = string.format("HP: %d / %d", math.ceil(health), math.ceil(safeMax))
+	hpLabel.Text = string.format("%d", math.ceil(health))
 	TweenService:Create(hpFill, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = UDim2.new(ratio, 0, 1, 0)
 	}):Play()
 end
 
-local function updateMoneyDisplay(explicitVal: number?)
-	local moneyVal = explicitVal
-	if moneyVal == nil then
-		local ls = player:FindFirstChild("leaderstats")
-		local walletObj = ls and (ls:FindFirstChild("Wallet") or ls:FindFirstChild("Money") or ls:FindFirstChild("Cash"))
-		local attrVal = player:GetAttribute("Wallet") or player:GetAttribute("Money")
-		moneyVal = (typeof(attrVal) == "number" and attrVal)
-			or (walletObj and typeof(walletObj.Value) == "number" and walletObj.Value)
-			or 0
-	end
-	moneyLabel.Text = string.format("WALLET: $%.2f", tonumber(moneyVal) or 0)
+local displayedOverallCash = 0
+local countUpThread: thread? = nil
+local lastWalletVal = 20
+
+local function animateWalletScalePunch()
+	gwScale.Scale = 1.12
+	TweenService:Create(gwScale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Scale = 1.0
+	}):Play()
 end
 
+local function rollOverallCash(targetCash: number)
+	if countUpThread then
+		task.cancel(countUpThread)
+		countUpThread = nil
+	end
+
+	local startVal = displayedOverallCash
+	local diff = targetCash - startVal
+	if math.abs(diff) <= 0.01 then
+		displayedOverallCash = targetCash
+		lobbyCashLabel.Text = string.format("+%d $", math.floor(targetCash))
+		return
+	end
+
+	countUpThread = task.spawn(function()
+		local duration = 1.0
+		local startTime = os.clock()
+		while true do
+			local elapsed = os.clock() - startTime
+			local progress = math.clamp(elapsed / duration, 0, 1)
+			local alpha = TweenService:GetValue(progress, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+			local cur = math.floor(startVal + (diff * alpha))
+			displayedOverallCash = cur
+			lobbyCashLabel.Text = string.format("+%d $", cur)
+			if progress >= 1 then break end
+			task.wait(0.03)
+		end
+		displayedOverallCash = targetCash
+		lobbyCashLabel.Text = string.format("+%d $", math.floor(targetCash))
+		countUpThread = nil
+	end)
+end
+
+local function updateCurrencyUI()
+	local isInGame = (player:GetAttribute("IsInGame") == true)
+	local overallCash = player:GetAttribute("OverallCash") or 0
+	local matchWallet = player:GetAttribute("Wallet") or 20
+
+	-- In Spawn Lobby vs in-game:
+	hpBg.Visible = isInGame
+	statusStack.Size = isInGame and UDim2.new(0, 340, 0, 156) or UDim2.new(0, 340, 0, 98)
+
+	if isInGame then
+		if matchWallet ~= lastWalletVal then
+			if matchWallet < lastWalletVal then
+				animateWalletScalePunch()
+			end
+			lastWalletVal = matchWallet
+		end
+		lobbyCashLabel.Text = string.format("+%.2f $", matchWallet)
+	else
+		if countUpThread == nil then
+			displayedOverallCash = overallCash
+			lobbyCashLabel.Text = string.format("+%d $", math.floor(overallCash))
+		end
+	end
+end
+
+-- Backward compatibility alias
+local function updateMoneyDisplay()
+	updateCurrencyUI()
+end
+
+updateCurrencyUI()
+
 player.AttributeChanged:Connect(function(attr)
-	if attr == "Wallet" or attr == "Money" then
-		updateMoneyDisplay()
+	if attr == "OverallCash" or attr == "Wallet" or attr == "IsInGame" or attr == "Money" then
+		updateCurrencyUI()
 	elseif attr == "HP" or attr == "Health" then
 		local h = player:GetAttribute(attr)
 		if typeof(h) == "number" and activeHum then
@@ -204,12 +341,41 @@ player.AttributeChanged:Connect(function(attr)
 	end
 end)
 
+local function handlePayout(earnedCash: number, secondsSurvived: number, newOverall: number)
+	updateCurrencyUI()
+	rollOverallCash(newOverall)
+
+	payoutToast.Text = string.format("+$%d (%ds Survived × $20)", earnedCash, secondsSurvived)
+	payoutToast.Position = UDim2.new(0, 0, 0, -18)
+	payoutToast.TextTransparency = 0
+
+	TweenService:Create(payoutToast, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Position = UDim2.new(0, 0, 0, -32)
+	}):Play()
+
+	task.delay(4.0, function()
+		TweenService:Create(payoutToast, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			TextTransparency = 1
+		}):Play()
+	end)
+end
+
+if PayoutRemote then
+	PayoutRemote.OnClientEvent:Connect(handlePayout)
+else
+	task.spawn(function()
+		local remote = ReplicatedStorage:WaitForChild("CashPayoutEvent", 15) :: RemoteEvent?
+		if remote then
+			PayoutRemote = remote
+			remote.OnClientEvent:Connect(handlePayout)
+		end
+	end)
+end
+
 if StatsUpdated then
 	StatsUpdated.OnClientEvent:Connect(function(stats)
 		if stats then
-			if stats.Money ~= nil then
-				updateMoneyDisplay(stats.Money)
-			end
+			updateCurrencyUI()
 			if stats.Health ~= nil and activeHum then
 				updateHPDisplay(stats.Health, activeHum.MaxHealth)
 			end
@@ -660,10 +826,10 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 
-	-- Update White Energy Bar UI
+	-- Update Comic EP Bar UI
 	local energyRatio = math.clamp(currentEnergy / MAX_ENERGY, 0, 1)
 	energyFill.Size = UDim2.new(energyRatio, 0, 1, 0)
-	energyLabel.Text = string.format("ENERGY: %d%%", math.floor(currentEnergy))
+	energyLabel.Text = string.format("%d", math.floor(currentEnergy))
 end)
 
 print("[MovementDiveAndHUDClient] Initialized: Walk (90697464892050), Run (125757170550820), Dive (137603926461078) & Unified Stacked HUD.")

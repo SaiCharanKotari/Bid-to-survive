@@ -304,7 +304,7 @@ local function getPlayerBettingData(player: Player, customDataMap: any?)
 		local uid = player.UserId
 		local d = customDataMap[uid] or customDataMap[player]
 		if d then
-			return d.Money or d.Wallet or 0, d.CurrentBid or d.Bid or 0, d.SubmitTime or d.BetTime or 10.0, d.LostBet
+			return d.Wallet or d.Money or 0, d.CurrentBid or d.Bid or 0, d.SubmitTime or d.BetTime or 10.0, d.LostBet
 		end
 	end
 

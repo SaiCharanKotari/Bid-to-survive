@@ -4399,14 +4399,14 @@ local currentDiveAnimId = R6_DIVE_ANIM_ID
 
 local BASE_WALK_SPEED    = 14
 local SPRINT_WALK_SPEED  = 21
-local DIVE_FORWARD_SPEED = 32 -- Slightly decreased forward dive impulse for tighter, more athletic control
-local DIVE_DURATION      = 0.68 -- Fallback duration if track length hasn't loaded
-local DIVE_LANDING_DELAY = 0.22 -- Recovery delay on ground before returning to normal standing
+local DIVE_FORWARD_SPEED = 28 -- Forward dive impulse speed (athletic glide)
+local DIVE_DURATION      = 0.75 -- Exact 0.75s dive timeline (1.50s start -> 2.25s final frame)
+local DIVE_LANDING_DELAY = 0.0 -- 0.0s = Zero ground recovery pause, instant upright standing
 
 -- Energy Settings (White Bar)
 local MAX_ENERGY        = 100
-local SPRINT_DRAIN_RATE = 24 -- Energy drained per second while running
-local DIVE_ENERGY_COST  = 28 -- Burst energy consumed on Spacebar Dive
+local SPRINT_DRAIN_RATE = 18 -- Energy drained per second while running
+local DIVE_ENERGY_COST  = 20 -- Burst energy consumed on Spacebar Dive
 local ENERGY_REGEN_RATE = 18 -- Energy regenerated per second when walking/idle
 
 local currentEnergy = MAX_ENERGY
@@ -4442,13 +4442,14 @@ local function createOrUpdateStatusHUD()
 	screenGui.Parent = playerGui
 
 	-- ========================================================================
-	-- A) BOTTOM-LEFT STACK: Strictly HP (Red) & ENERGY (Pure White)
+	-- COMIC POP-ART STATUS STACK: Lifetime Cash, HP (Red), and EP (Cyan)
+	-- Slightly reduced dimensions (width: 315px, height: 44px, text: 19px)
 	-- ========================================================================
 	local statusStack = Instance.new("Frame")
 	statusStack.Name = "BottomLeftStatusStack"
 	statusStack.AnchorPoint = Vector2.new(0, 1)
 	statusStack.Position = UDim2.new(0, 24, 1, -24)
-	statusStack.Size = UDim2.new(0, 260, 0, 74)
+	statusStack.Size = UDim2.new(0, 315, 0, 134)
 	statusStack.BackgroundTransparency = 1
 	statusStack.Parent = screenGui
 
@@ -4458,22 +4459,23 @@ local function createOrUpdateStatusHUD()
 	listLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
 	listLayout.Parent = statusStack
 
-	local function createThemedBar(order: number, name: string, labelText: string, fillColor: Color3)
+	local function createComicBar(order: number, name: string, tagText: string, fillColor: Color3, underlayColor: Color3)
 		local bg = Instance.new("Frame")
 		bg.Name = name .. "Frame"
 		bg.LayoutOrder = order
-		bg.Size = UDim2.new(1, 0, 0, 32)
-		bg.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
-		bg.BackgroundTransparency = 0.15
+		bg.Size = UDim2.new(1, 0, 0, 44)
+		bg.BackgroundColor3 = underlayColor
+		bg.BorderSizePixel = 0
 		bg.Parent = statusStack
 
 		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 8)
+		corner.CornerRadius = UDim.new(0, 4)
 		corner.Parent = bg
 
 		local stroke = Instance.new("UIStroke")
-		stroke.Color = Color3.fromRGB(55, 60, 75)
-		stroke.Thickness = 1.5
+		stroke.Color = Color3.fromRGB(0, 0, 0)
+		stroke.Thickness = 3
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		stroke.Parent = bg
 
 		local fill = Instance.new("Frame")
@@ -4484,167 +4486,219 @@ local function createOrUpdateStatusHUD()
 		fill.Parent = bg
 
 		local fillCorner = Instance.new("UICorner")
-		fillCorner.CornerRadius = UDim.new(0, 8)
+		fillCorner.CornerRadius = UDim.new(0, 4)
 		fillCorner.Parent = fill
 
-		local isWhite = (fillColor == Color3.fromRGB(255, 255, 255))
-		local label = Instance.new("TextLabel")
-		label.Name = "ValueLabel"
-		label.Size = UDim2.new(1, -20, 1, 0)
-		label.Position = UDim2.new(0, 10, 0, 0)
-		label.BackgroundTransparency = 1
-		label.Font = Enum.Font.GothamBold
-		label.TextSize = 14
-		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.TextColor3 = isWhite and Color3.fromRGB(25, 30, 40) or Color3.fromRGB(255, 255, 255)
-		label.TextStrokeTransparency = isWhite and 0.85 or 0.35
-		label.Text = labelText
-		label.ZIndex = 2
-		label.Parent = bg
+		-- Left Label (e.g. "HP" or "EP")
+		local tagLabel = Instance.new("TextLabel")
+		tagLabel.Name = "TagLabel"
+		tagLabel.Size = UDim2.new(0, 44, 1, 0)
+		tagLabel.Position = UDim2.new(0, 12, 0.5, 0)
+		tagLabel.AnchorPoint = Vector2.new(0, 0.5)
+		tagLabel.BackgroundTransparency = 1
+		tagLabel.Font = Enum.Font.GothamBlack
+		tagLabel.TextSize = 19
+		tagLabel.TextXAlignment = Enum.TextXAlignment.Left
+		tagLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		tagLabel.Text = tagText
+		tagLabel.ZIndex = 3
+		tagLabel.Parent = bg
 
-		return bg, fill, label
+		local tagStroke = Instance.new("UIStroke")
+		tagStroke.Thickness = 2.5
+		tagStroke.Color = Color3.fromRGB(0, 0, 0)
+		tagStroke.Parent = tagLabel
+
+		-- Right Numeric Value Label (e.g. "100")
+		local valLabel = Instance.new("TextLabel")
+		valLabel.Name = "ValueLabel"
+		valLabel.Size = UDim2.new(0, 75, 1, 0)
+		valLabel.Position = UDim2.new(1, -12, 0.5, 0)
+		valLabel.AnchorPoint = Vector2.new(1, 0.5)
+		valLabel.BackgroundTransparency = 1
+		valLabel.Font = Enum.Font.GothamBlack
+		valLabel.TextSize = 19
+		valLabel.TextXAlignment = Enum.TextXAlignment.Right
+		valLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		valLabel.Text = "100"
+		valLabel.ZIndex = 3
+		valLabel.Parent = bg
+
+		local valStroke = Instance.new("UIStroke")
+		valStroke.Thickness = 2.5
+		valStroke.Color = Color3.fromRGB(0, 0, 0)
+		valStroke.Parent = valLabel
+
+		return bg, fill, valLabel
 	end
 
-	local hpBg, hpFill, hpLabel = createThemedBar(1, "HP", "HP: 100 / 100", Color3.fromRGB(235, 55, 65))
-	local _, energyFill, energyLabel = createThemedBar(2, "Energy", "ENERGY: 100%", Color3.fromRGB(255, 255, 255))
+	-- Red HP Bar (#FF0000 with 3px black stroke, white HP & number)
+	local hpBg, hpFill, hpLabel = createComicBar(2, "HP", "HP", Color3.fromRGB(255, 0, 0), Color3.fromRGB(60, 10, 15))
+	-- Cyan EP Bar (#00FFF2 with 3px black stroke, white EP & number)
+	local _, energyFill, energyLabel = createComicBar(3, "Energy", "EP", Color3.fromRGB(0, 255, 242), Color3.fromRGB(10, 45, 50))
 
-	-- ========================================================================
-	-- B) LEFT-SIDE LOBBY CASH CARD (Overall Inventory Money from All Games)
-	-- Visible when in Lobby (IsInGame == false)
-	-- ========================================================================
-	local lobbyCashCard = Instance.new("Frame")
-	lobbyCashCard.Name = "LobbyOverallCashCard"
-	lobbyCashCard.AnchorPoint = Vector2.new(0, 0.5)
-	lobbyCashCard.Position = UDim2.new(0, 24, 0.48, 0)
-	lobbyCashCard.Size = UDim2.new(0, 235, 0, 70)
-	lobbyCashCard.BackgroundColor3 = Color3.fromRGB(18, 21, 30)
-	lobbyCashCard.BackgroundTransparency = 0.12
-	lobbyCashCard.ClipsDescendants = false
-	lobbyCashCard.Parent = screenGui
+	-- Comic Green Lifetime Cash Frame (+0 $) with "CASH" badge
+	local moneyFrame = Instance.new("Frame")
+	moneyFrame.Name = "LifetimeCashFrame"
+	moneyFrame.LayoutOrder = 1
+	moneyFrame.Size = UDim2.new(1, 0, 0, 30)
+	moneyFrame.BackgroundTransparency = 1
+	moneyFrame.Parent = statusStack
 
-	local lcCorner = Instance.new("UICorner")
-	lcCorner.CornerRadius = UDim.new(0, 12)
-	lcCorner.Parent = lobbyCashCard
+	local cashBadge = Instance.new("Frame")
+	cashBadge.Name = "CashBadge"
+	cashBadge.Size = UDim2.new(0, 52, 0, 22)
+	cashBadge.Position = UDim2.new(0, 0, 0.5, 0)
+	cashBadge.AnchorPoint = Vector2.new(0, 0.5)
+	cashBadge.BackgroundColor3 = Color3.fromRGB(0, 204, 0)
+	cashBadge.BorderSizePixel = 0
+	cashBadge.Parent = moneyFrame
 
-	local lcStroke = Instance.new("UIStroke")
-	lcStroke.Color = Color3.fromRGB(245, 158, 11) -- Gold/Amber Inventory Accent
-	lcStroke.Thickness = 1.8
-	lcStroke.Parent = lobbyCashCard
+	local badgeCorner = Instance.new("UICorner")
+	badgeCorner.CornerRadius = UDim.new(0, 4)
+	badgeCorner.Parent = cashBadge
 
-	local lcGradient = Instance.new("UIGradient")
-	lcGradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 28, 40)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(14, 16, 24)),
-	})
-	lcGradient.Rotation = 45
-	lcGradient.Parent = lobbyCashCard
+	local badgeStroke = Instance.new("UIStroke")
+	badgeStroke.Thickness = 2
+	badgeStroke.Color = Color3.fromRGB(0, 0, 0)
+	badgeStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	badgeStroke.Parent = cashBadge
 
-	local lcTitle = Instance.new("TextLabel")
-	lcTitle.Size = UDim2.new(1, -24, 0, 18)
-	lcTitle.Position = UDim2.new(0, 12, 0, 10)
-	lcTitle.BackgroundTransparency = 1
-	lcTitle.Font = Enum.Font.GothamBold
-	lcTitle.TextSize = 11
-	lcTitle.TextXAlignment = Enum.TextXAlignment.Left
-	lcTitle.TextColor3 = Color3.fromRGB(148, 163, 184)
-	lcTitle.Text = "TOTAL EARNED CASH"
-	lcTitle.Parent = lobbyCashCard
+	local badgeLabel = Instance.new("TextLabel")
+	badgeLabel.Name = "BadgeText"
+	badgeLabel.Size = UDim2.new(1, 0, 1, 0)
+	badgeLabel.BackgroundTransparency = 1
+	badgeLabel.Font = Enum.Font.GothamBlack
+	badgeLabel.TextSize = 12
+	badgeLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+	badgeLabel.Text = "CASH"
+	badgeLabel.Parent = cashBadge
 
-	local lobbyCashLabel = Instance.new("TextLabel")
-	lobbyCashLabel.Name = "AmountLabel"
-	lobbyCashLabel.Size = UDim2.new(1, -24, 0, 34)
-	lobbyCashLabel.Position = UDim2.new(0, 12, 0, 28)
-	lobbyCashLabel.BackgroundTransparency = 1
-	lobbyCashLabel.Font = Enum.Font.GothamBlack
-	lobbyCashLabel.TextSize = 26
-	lobbyCashLabel.TextXAlignment = Enum.TextXAlignment.Left
-	lobbyCashLabel.TextColor3 = Color3.fromRGB(251, 191, 36)
-	lobbyCashLabel.Text = "$0"
-	lobbyCashLabel.Parent = lobbyCashCard
+	local lifetimeCashLabel = Instance.new("TextLabel")
+	lifetimeCashLabel.Name = "LifetimeCashLabel"
+	lifetimeCashLabel.Size = UDim2.new(1, -60, 1, 0)
+	lifetimeCashLabel.Position = UDim2.new(0, 60, 0.5, 0)
+	lifetimeCashLabel.AnchorPoint = Vector2.new(0, 0.5)
+	lifetimeCashLabel.BackgroundTransparency = 1
+	lifetimeCashLabel.Font = Enum.Font.GothamBlack
+	lifetimeCashLabel.TextSize = 24
+	lifetimeCashLabel.TextXAlignment = Enum.TextXAlignment.Left
+	lifetimeCashLabel.TextColor3 = Color3.fromRGB(0, 230, 0) -- Lime green #00E600
+	lifetimeCashLabel.Text = "+0 $"
+	lifetimeCashLabel.ZIndex = 3
+	lifetimeCashLabel.Parent = moneyFrame
 
-	-- Floating Payout Toast right above Lobby Cash Card ("+$600 (30s * $20)")
+	local moneyStroke = Instance.new("UIStroke")
+	moneyStroke.Thickness = 3
+	moneyStroke.Color = Color3.fromRGB(0, 0, 0)
+	moneyStroke.Parent = lifetimeCashLabel
+
+	local lifetimeCashScale = Instance.new("UIScale")
+	lifetimeCashScale.Scale = 1.0
+	lifetimeCashScale.Parent = lifetimeCashLabel
+
+	-- Floating Payout Toast
 	local payoutToast = Instance.new("TextLabel")
 	payoutToast.Name = "PayoutToast"
 	payoutToast.Size = UDim2.new(1, 40, 0, 24)
-	payoutToast.Position = UDim2.new(0, 0, 0, -32)
+	payoutToast.Position = UDim2.new(0, 0, 0, -26)
 	payoutToast.BackgroundTransparency = 1
 	payoutToast.Font = Enum.Font.GothamBlack
-	payoutToast.TextSize = 14
+	payoutToast.TextSize = 15
 	payoutToast.TextXAlignment = Enum.TextXAlignment.Left
 	payoutToast.TextColor3 = Color3.fromRGB(52, 211, 153)
 	payoutToast.TextStrokeTransparency = 0.2
 	payoutToast.TextTransparency = 1
 	payoutToast.Text = ""
-	payoutToast.Parent = lobbyCashCard
+	payoutToast.Parent = moneyFrame
 
 	-- ========================================================================
-	-- C) BOTTOM-RIGHT IN-GAME WALLET CARD ($20 Starting Match Wallet)
-	-- Visible ONLY when In-Game (IsInGame == true)
+	-- BOTTOM-RIGHT WALLET CARD: "WALLET" badge + current playable session funds ($20.00)
+	-- Mirrored against bottom-left status stack, non-overlapping, comic style
 	-- ========================================================================
-	local gameWalletCard = Instance.new("Frame")
-	gameWalletCard.Name = "InGameWalletCard"
-	gameWalletCard.AnchorPoint = Vector2.new(1, 1)
-	gameWalletCard.Position = UDim2.new(1, -24, 1, -24)
-	gameWalletCard.Size = UDim2.new(0, 215, 0, 64)
-	gameWalletCard.BackgroundColor3 = Color3.fromRGB(16, 22, 28)
-	gameWalletCard.BackgroundTransparency = 0.12
-	gameWalletCard.Visible = false
-	gameWalletCard.Parent = screenGui
+	local walletCard = Instance.new("Frame")
+	walletCard.Name = "BottomRightWalletCard"
+	walletCard.AnchorPoint = Vector2.new(1, 1)
+	walletCard.Position = UDim2.new(1, -24, 1, -24)
+	walletCard.Size = UDim2.new(0, 185, 0, 44)
+	walletCard.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+	walletCard.BorderSizePixel = 0
+	walletCard.Parent = screenGui
 
-	local gwCorner = Instance.new("UICorner")
-	gwCorner.CornerRadius = UDim.new(0, 12)
-	gwCorner.Parent = gameWalletCard
+	local walletCorner = Instance.new("UICorner")
+	walletCorner.CornerRadius = UDim.new(0, 4)
+	walletCorner.Parent = walletCard
 
-	local gwStroke = Instance.new("UIStroke")
-	gwStroke.Color = Color3.fromRGB(52, 211, 153) -- Crisp Emerald Wallet Border
-	gwStroke.Thickness = 1.8
-	gwStroke.Parent = gameWalletCard
+	local walletStroke = Instance.new("UIStroke")
+	walletStroke.Thickness = 3
+	walletStroke.Color = Color3.fromRGB(0, 0, 0)
+	walletStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	walletStroke.Parent = walletCard
 
-	local gwScale = Instance.new("UIScale")
-	gwScale.Scale = 1.0
-	gwScale.Parent = gameWalletCard
+	-- "WALLET" Badge on left of card
+	local walletBadge = Instance.new("Frame")
+	walletBadge.Name = "WalletBadge"
+	walletBadge.Size = UDim2.new(0, 68, 0, 26)
+	walletBadge.Position = UDim2.new(0, 9, 0.5, 0)
+	walletBadge.AnchorPoint = Vector2.new(0, 0.5)
+	walletBadge.BackgroundColor3 = Color3.fromRGB(255, 185, 0) -- Bold comic gold/yellow
+	walletBadge.BorderSizePixel = 0
+	walletBadge.Parent = walletCard
 
-	local gwGradient = Instance.new("UIGradient")
-	gwGradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 28, 34)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 16, 22)),
-	})
-	gwGradient.Rotation = 45
-	gwGradient.Parent = gameWalletCard
+	local wbCorner = Instance.new("UICorner")
+	wbCorner.CornerRadius = UDim.new(0, 4)
+	wbCorner.Parent = walletBadge
 
-	local gwTitle = Instance.new("TextLabel")
-	gwTitle.Size = UDim2.new(1, -24, 0, 18)
-	gwTitle.Position = UDim2.new(0, 12, 0, 8)
-	gwTitle.BackgroundTransparency = 1
-	gwTitle.Font = Enum.Font.GothamBold
-	gwTitle.TextSize = 11
-	gwTitle.TextXAlignment = Enum.TextXAlignment.Right
-	gwTitle.TextColor3 = Color3.fromRGB(167, 243, 208)
-	gwTitle.Text = "ROUND WALLET"
-	gwTitle.Parent = gameWalletCard
+	local wbStroke = Instance.new("UIStroke")
+	wbStroke.Thickness = 2
+	wbStroke.Color = Color3.fromRGB(0, 0, 0)
+	wbStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	wbStroke.Parent = walletBadge
 
-	local gameWalletLabel = Instance.new("TextLabel")
-	gameWalletLabel.Name = "WalletAmount"
-	gameWalletLabel.Size = UDim2.new(1, -24, 0, 32)
-	gameWalletLabel.Position = UDim2.new(0, 12, 0, 26)
-	gameWalletLabel.BackgroundTransparency = 1
-	gameWalletLabel.Font = Enum.Font.GothamBlack
-	gameWalletLabel.TextSize = 26
-	gameWalletLabel.TextXAlignment = Enum.TextXAlignment.Right
-	gameWalletLabel.TextColor3 = Color3.fromRGB(52, 211, 153)
-	gameWalletLabel.Text = "$20"
-	gameWalletLabel.Parent = gameWalletCard
+	local wbText = Instance.new("TextLabel")
+	wbText.Name = "BadgeText"
+	wbText.Size = UDim2.new(1, 0, 1, 0)
+	wbText.BackgroundTransparency = 1
+	wbText.Font = Enum.Font.GothamBlack
+	wbText.TextSize = 13
+	wbText.TextColor3 = Color3.fromRGB(0, 0, 0)
+	wbText.Text = "WALLET"
+	wbText.Parent = walletBadge
 
-	return hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lobbyCashCard, lobbyCashLabel, payoutToast, gameWalletCard, gameWalletLabel, gwScale
+	-- Numeric Wallet Value (e.g. "$20.00")
+	local walletValLabel = Instance.new("TextLabel")
+	walletValLabel.Name = "WalletValueLabel"
+	walletValLabel.Size = UDim2.new(1, -88, 1, 0)
+	walletValLabel.Position = UDim2.new(1, -12, 0.5, 0)
+	walletValLabel.AnchorPoint = Vector2.new(1, 0.5)
+	walletValLabel.BackgroundTransparency = 1
+	walletValLabel.Font = Enum.Font.GothamBlack
+	walletValLabel.TextSize = 19
+	walletValLabel.TextXAlignment = Enum.TextXAlignment.Right
+	walletValLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	walletValLabel.Text = "$20.00"
+	walletValLabel.ZIndex = 3
+	walletValLabel.Parent = walletCard
+
+	local walletValStroke = Instance.new("UIStroke")
+	walletValStroke.Thickness = 2.5
+	walletValStroke.Color = Color3.fromRGB(0, 0, 0)
+	walletValStroke.Parent = walletValLabel
+
+	local walletScale = Instance.new("UIScale")
+	walletScale.Scale = 1.0
+	walletScale.Parent = walletCard
+
+	return hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lifetimeCashLabel, payoutToast, walletCard, walletValLabel, walletScale
 end
 
-local hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lobbyCashCard, lobbyCashLabel, payoutToast, gameWalletCard, gameWalletLabel, gwScale =
+local hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lifetimeCashLabel, payoutToast, walletCard, walletValLabel, walletScale =
 	createOrUpdateStatusHUD()
 
 local function updateHPDisplay(health: number, maxHealth: number)
 	local safeMax = (maxHealth > 0) and maxHealth or 100
 	local ratio = math.clamp(health / safeMax, 0, 1)
-	hpLabel.Text = string.format("HP: %d / %d", math.ceil(health), math.ceil(safeMax))
+	hpLabel.Text = string.format("%d", math.ceil(health))
 	TweenService:Create(hpFill, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = UDim2.new(ratio, 0, 1, 0)
 	}):Play()
@@ -4655,8 +4709,8 @@ local countUpThread: thread? = nil
 local lastWalletVal = 20
 
 local function animateWalletScalePunch()
-	gwScale.Scale = 1.08
-	TweenService:Create(gwScale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+	walletScale.Scale = 1.10
+	TweenService:Create(walletScale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 		Scale = 1.0
 	}):Play()
 end
@@ -4671,12 +4725,12 @@ local function rollOverallCash(targetCash: number)
 	local diff = targetCash - startVal
 	if math.abs(diff) <= 0.01 then
 		displayedOverallCash = targetCash
-		lobbyCashLabel.Text = string.format("$%d", math.floor(targetCash))
+		lifetimeCashLabel.Text = string.format("+%d $", math.floor(targetCash))
 		return
 	end
 
 	countUpThread = task.spawn(function()
-		local duration = 1.2
+		local duration = 1.0
 		local startTime = os.clock()
 		while true do
 			local elapsed = os.clock() - startTime
@@ -4684,12 +4738,12 @@ local function rollOverallCash(targetCash: number)
 			local alpha = TweenService:GetValue(progress, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 			local cur = math.floor(startVal + (diff * alpha))
 			displayedOverallCash = cur
-			lobbyCashLabel.Text = string.format("$%d", cur)
+			lifetimeCashLabel.Text = string.format("+%d $", cur)
 			if progress >= 1 then break end
 			task.wait(0.03)
 		end
 		displayedOverallCash = targetCash
-		lobbyCashLabel.Text = string.format("$%d", math.floor(targetCash))
+		lifetimeCashLabel.Text = string.format("+%d $", math.floor(targetCash))
 		countUpThread = nil
 	end)
 end
@@ -4699,59 +4753,24 @@ local function updateCurrencyUI()
 	local overallCash = player:GetAttribute("OverallCash") or 0
 	local matchWallet = player:GetAttribute("Wallet") or 20
 
-	-- In Spawn Lobby, hide HP UI completely; only display during active in-game match
+	-- Manage status stack sizing based on in-game state
 	hpBg.Visible = isInGame
-	statusStack.Size = isInGame and UDim2.new(0, 260, 0, 74) or UDim2.new(0, 260, 0, 32)
+	statusStack.Size = isInGame and UDim2.new(0, 315, 0, 134) or UDim2.new(0, 315, 0, 82)
 
-	-- In-Game Wallet updates
+	-- 1. LEFT DISPLAY: Always authoritative Lifetime Cash
+	if countUpThread == nil then
+		displayedOverallCash = overallCash
+		lifetimeCashLabel.Text = string.format("+%d $", math.floor(overallCash))
+	end
+
+	-- 2. RIGHT DISPLAY: Current session Wallet
 	if matchWallet ~= lastWalletVal then
-		if matchWallet < lastWalletVal and isInGame then
+		if matchWallet < lastWalletVal then
 			animateWalletScalePunch()
 		end
 		lastWalletVal = matchWallet
 	end
-	gameWalletLabel.Text = string.format("$%d", math.floor(matchWallet))
-
-	-- Lobby Cash Display
-	if countUpThread == nil then
-		displayedOverallCash = overallCash
-		lobbyCashLabel.Text = string.format("$%d", math.floor(overallCash))
-	end
-
-	-- Slide In / Slide Out transitions
-	if isInGame then
-		-- Entering Game: Slide Lobby Cash left, Slide Wallet in from right
-		gameWalletCard.Visible = true
-		TweenService:Create(gameWalletCard, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-			Position = UDim2.new(1, -24, 1, -24)
-		}):Play()
-
-		local lobbyOut = TweenService:Create(lobbyCashCard, TweenInfo.new(0.30, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
-			Position = UDim2.new(0, -280, 0.48, 0)
-		})
-		lobbyOut:Play()
-		lobbyOut.Completed:Once(function()
-			if player:GetAttribute("IsInGame") == true then
-				lobbyCashCard.Visible = false
-			end
-		end)
-	else
-		-- Returning to Lobby: Slide Wallet out to right, Slide Lobby Cash in from left
-		lobbyCashCard.Visible = true
-		TweenService:Create(lobbyCashCard, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-			Position = UDim2.new(0, 24, 0.48, 0)
-		}):Play()
-
-		local walletOut = TweenService:Create(gameWalletCard, TweenInfo.new(0.30, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
-			Position = UDim2.new(1, 280, 1, -24)
-		})
-		walletOut:Play()
-		walletOut.Completed:Once(function()
-			if player:GetAttribute("IsInGame") ~= true then
-				gameWalletCard.Visible = false
-			end
-		end)
-	end
+	walletValLabel.Text = string.format("$%.2f", matchWallet)
 end
 
 -- Backward compatibility alias
@@ -4817,7 +4836,7 @@ end
 -- ============================================================================
 -- 3. CUSTOM WALK & RUN ANIMATION CONTROLLER
 -- ============================================================================
-local function syncMovementTracks()
+local function syncMovementTracks(instant: boolean?)
 	if not activeHum or activeHum.Health <= 0 or isDiving then return end
 
 	local isMoving = activeHum.MoveDirection.Magnitude > 0.05
@@ -4848,28 +4867,36 @@ local function syncMovementTracks()
 		lastMovementState = newState
 	end
 
+	local fadeTime = instant and 0 or 0.12
+
 	if not isMoving then
-		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.15) end
-		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.15) end
+		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(fadeTime) end
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(fadeTime) end
 	elseif wantSprint then
-		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.12) end
-		if runTrack and not runTrack.IsPlaying then runTrack:Play(0.12, 1, 1.0) end
-		-- Suppress default Animate movement tracks so custom sprint animation displays without interference
+		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(fadeTime) end
+		if runTrack and not runTrack.IsPlaying then runTrack:Play(fadeTime, 1, 1.0) end
+		-- Suppress default Animate walk/run tracks so custom sprint animation displays cleanly without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= runTrack and tr ~= diveTrack and tr ~= walkTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
-					tr:Stop(0.1)
+				if tr ~= runTrack and tr ~= diveTrack and tr ~= walkTrack then
+					local animName = tr.Name:lower()
+					if animName:find("walk") or animName:find("run") or tr.Priority == Enum.AnimationPriority.Movement then
+						tr:Stop(0.05)
+					end
 				end
 			end
 		end
 	else
-		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.12) end
-		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play(0.12, 1, 1.0) end
-		-- Suppress default Animate movement tracks so custom walk animation displays without interference
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(fadeTime) end
+		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play(fadeTime, 1, 1.0) end
+		-- Suppress default Animate walk/run tracks so custom walk animation displays cleanly without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= walkTrack and tr ~= diveTrack and tr ~= runTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
-					tr:Stop(0.1)
+				if tr ~= walkTrack and tr ~= diveTrack and tr ~= runTrack then
+					local animName = tr.Name:lower()
+					if animName:find("walk") or animName:find("run") or tr.Priority == Enum.AnimationPriority.Movement then
+						tr:Stop(0.05)
+					end
 				end
 			end
 		end
@@ -4877,7 +4904,7 @@ local function syncMovementTracks()
 end
 
 -- ============================================================================
--- 4. SPACEBAR DIVE WITH FORWARD LANDING CALCULATION (NO SNAP-BACK!)
+-- 4. SPACEBAR DIVE (EXACT 1.50s -> 2.25s TIMELINE, ZERO REVERSE RECOVERY)
 -- ============================================================================
 local function performRunningDive()
 	if isDiving or not activeChar or not activeHum or not activeHRP then return end
@@ -4894,18 +4921,23 @@ local function performRunningDive()
 
 	isDiving = true
 	currentEnergy = math.max(0, currentEnergy - DIVE_ENERGY_COST)
-	print(string.format("[Movement][Dive] 🏊 Spacebar Dive initiated! (Direction: %s, Energy before: %d%%, Cost: %d%%)", tostring(flatDir), math.floor(currentEnergy + DIVE_ENERGY_COST), DIVE_ENERGY_COST))
 
-	-- Stop normal jump so pressing Space while running triggers Dive instead of jumping
+	local diveStartTime = os.clock()
+	local startPos = activeHRP.Position
+	print(string.format("[Movement][Dive] 🏊 Dive initiated at os.clock() = %.4f | StartPos: (%.2f, %.2f, %.2f), Dir: (%.2f, 0, %.2f), Energy: %d%%",
+		diveStartTime, startPos.X, startPos.Y, startPos.Z, flatDir.X, flatDir.Z, math.floor(currentEnergy)))
+
+	-- Prevent normal jump while dive is active
 	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
 
-	if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.1) end
-	if runTrack and runTrack.IsPlaying then runTrack:Stop(0.1) end
+	-- Stop walk/run tracks immediately so they don't fight with dive track
+	if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0) end
+	if runTrack and runTrack.IsPlaying then runTrack:Stop(0) end
 
 	-- Face character cleanly in the dive direction
 	activeHRP.CFrame = CFrame.lookAt(activeHRP.Position, activeHRP.Position + flatDir)
 
-	-- Motion Design: Aerodynamic pure white motion trail during dive roll
+	-- Aerodynamic pure white motion trail during dive roll
 	local trailAtt0 = Instance.new("Attachment")
 	trailAtt0.Name = "DiveTrailAtt0"
 	trailAtt0.Position = Vector3.new(0, 1.1, 0)
@@ -4935,88 +4967,151 @@ local function performRunningDive()
 	})
 	diveTrail.Parent = activeHRP
 
-	local visualTorso = activeChar:FindFirstChild("LowerTorso") or activeChar:FindFirstChild("Torso")
-	local diveDuration = 0.68 -- Dynamic fallback if metadata hasn't loaded yet
+	local torso = activeChar:FindFirstChild("Torso") or activeChar:FindFirstChild("UpperTorso")
+	local head = activeChar:FindFirstChild("Head")
 
+	-- Disable Torso and Head CanCollide during roll so rotating body parts never snag on floor
+	if torso and torso:IsA("BasePart") then torso.CanCollide = false end
+	if head and head:IsA("BasePart") then head.CanCollide = false end
+
+	-- Play dive animation calibrated to complete exactly at DIVE_DURATION (0.75s)
+	-- Keyframes reach final landing frame at exactly 0.75s
+	local trackLen = (diveTrack and diveTrack.Length > 0.05) and diveTrack.Length or 0.429
+	local animSpeed = trackLen / DIVE_DURATION
 	if diveTrack then
-		diveTrack:Play(0.08, 1, 1.0)
-		if diveTrack.Length and diveTrack.Length > 0.05 then
-			diveDuration = diveTrack.Length
-		end
-		print(string.format("[Movement][Dive] 🎬 DiveTrack playing (Length: %.2fs, Priority: %s)", diveDuration, diveTrack.Priority.Name))
+		diveTrack.Looped = false
+		diveTrack.Priority = Enum.AnimationPriority.Action4
+		diveTrack:Play(0, 1, animSpeed)
+		print(string.format("[Movement][Dive] 🎬 DiveTrack playing (TrackLen: %.3fs, TargetDuration: %.2fs, PlaySpeed: %.3f, Priority: %s)",
+			trackLen, DIVE_DURATION, animSpeed, diveTrack.Priority.Name))
 	end
+
+	-- Forward glide impulse via BodyVelocity
+	local bv = Instance.new("BodyVelocity")
+	bv.Name = "DiveImpulse"
+	bv.MaxForce = Vector3.new(250000, 0, 250000)
+	bv.Velocity = flatDir * DIVE_FORWARD_SPEED
+	bv.Parent = activeHRP
 
 	local rayParams = RaycastParams.new()
 	rayParams.FilterDescendantsInstances = { activeChar }
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-	local torso = activeChar:FindFirstChild("Torso")
-	local head = activeChar:FindFirstChild("Head")
-
-	-- 1. CRITICAL: Disable Torso and Head CanCollide during roll so rotating body parts
-	-- NEVER collide into or penetrate the 1-stud thick floor parts!
-	if torso and torso:IsA("BasePart") then torso.CanCollide = false end
-	if head and head:IsA("BasePart") then head.CanCollide = false end
-
-	-- 2. Apply horizontal physics impulse with MaxForce.Y = 0
-	-- Vertical axis is handled 100% by Roblox's native floor suspension, making it physically impossible to fall through the floor!
-	local bv = Instance.new("BodyVelocity")
-	bv.Name = "DiveImpulse"
-	bv.MaxForce = Vector3.new(150000, 0, 150000)
-	bv.Velocity = flatDir * DIVE_FORWARD_SPEED
-	bv.Parent = activeHRP
-
-	local startTime = os.clock()
-	while (os.clock() - startTime) < diveDuration do
-		task.wait(0.03)
+	-- Forward motion loop: runs until exactly DIVE_DURATION (0.75s) has elapsed
+	while (os.clock() - diveStartTime) < DIVE_DURATION do
+		task.wait(0.02)
 		if not activeHRP or not activeHum or activeHum.Health <= 0 then break end
 
-		local elapsed = os.clock() - startTime
-		local alpha = math.clamp(elapsed / diveDuration, 0, 1)
-		local curSpeed = DIVE_FORWARD_SPEED * (1 - (alpha * 0.55))
+		local elapsed = os.clock() - diveStartTime
+		local alpha = math.clamp(elapsed / DIVE_DURATION, 0, 1)
+		local curSpeed = DIVE_FORWARD_SPEED * (1 - (alpha * 0.35))
 
-		-- Edge & cliff protection: verify solid ground still exists 3.5 studs ahead
-		local checkPos = activeHRP.Position + (flatDir * 3.5)
-		local floorAhead = Workspace:Raycast(checkPos + Vector3.new(0, 3, 0), Vector3.new(0, -8, 0), rayParams)
-		if floorAhead then
-			bv.Velocity = flatDir * curSpeed
-		else
-			-- Edge detected! Cut velocity so character stays safely on the platform
+		-- Wall obstacle check
+		local wallRay = Workspace:Raycast(activeHRP.Position, flatDir * 2.5, rayParams)
+		if wallRay then
 			bv.Velocity = Vector3.zero
+		else
+			-- Floor ahead safety check
+			local checkPos = activeHRP.Position + (flatDir * 3.0)
+			local floorAhead = Workspace:Raycast(checkPos + Vector3.new(0, 3, 0), Vector3.new(0, -8, 0), rayParams)
+			if floorAhead then
+				bv.Velocity = flatDir * curSpeed
+			else
+				bv.Velocity = Vector3.zero
+			end
 		end
 	end
 
-	-- Clean up impulse and restore body collisions
+	-- AT EXACTLY 0.75s (2.25s mark): Dive animation reaches final frame!
+	local diveEndTime = os.clock()
+
+	-- 1. Remove impulse and stop linear velocity at actual landing position
 	if bv and bv.Parent then
 		bv:Destroy()
 	end
+	activeHRP.AssemblyLinearVelocity = Vector3.zero
+
+	-- 2. Floor alignment: ensure character lands solidly on ground at actual reached position
+	local floorRay = Workspace:Raycast(activeHRP.Position + Vector3.new(0, 3, 0), Vector3.new(0, -8, 0), rayParams)
+	if floorRay then
+		local hipHeight = (activeHum.RigType == Enum.HumanoidRigType.R6) and 2.8 or (activeHum.HipHeight + activeHRP.Size.Y * 0.5)
+		local safeY = floorRay.Position.Y + hipHeight
+		activeHRP.CFrame = CFrame.new(activeHRP.Position.X, safeY, activeHRP.Position.Z) * CFrame.Angles(0, math.atan2(-flatDir.X, -flatDir.Z), 0)
+	end
+	local landingPos = activeHRP.Position
+
+	-- 3. STOP DIVE ANIMATION IMMEDIATELY (ZERO FADE-OUT!)
+	-- A non-zero fadeTime causes Roblox to interpolate the 90+ deg dive roll backwards to 0 deg,
+	-- which visually manifests as a reverse recovery rewind. Calling Stop(0) eliminates this completely!
+	if diveTrack and diveTrack.IsPlaying then
+		diveTrack:Stop(0)
+	end
+	local diveStopTime = os.clock()
+
+	-- Stop any other lingering dive tracks on the Animator
+	local animator = activeHum:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+			if tr.Animation and tr.Animation.AnimationId == currentDiveAnimId then
+				tr:Stop(0)
+			end
+		end
+	end
+
+	-- 4. Clean up motion trail and restore body collision immediately
+	diveTrail.Enabled = false
+	Debris:AddItem(diveTrail, 0.2)
+	Debris:AddItem(trailAtt0, 0.2)
+	Debris:AddItem(trailAtt1, 0.2)
 	if torso and torso:IsA("BasePart") then torso.CanCollide = true end
 	if head and head:IsA("BasePart") then head.CanCollide = true end
 
-	print(string.format("[Movement][Dive] 🎯 Dive complete and safely landed on floor at %s", tostring(activeHRP.Position)))
-
-	-- Fade and cleanly clean up motion trail
-	diveTrail.Enabled = false
-	Debris:AddItem(diveTrail, 0.35)
-	Debris:AddItem(trailAtt0, 0.35)
-	Debris:AddItem(trailAtt1, 0.35)
-
-	-- Ground recovery delay: damp speed briefly so character absorbs the landing before springing back up
-	if activeHum and activeHum.Health > 0 then
-		activeHum.WalkSpeed = 6 -- Momentarily dampened crawl/recovery speed
-	end
-
-	-- Slight delay on the ground before returning to normal standing posture
-	task.wait(DIVE_LANDING_DELAY)
-
-	-- Smoothly stop Dive track as player recovers into standing
-	if diveTrack and diveTrack.IsPlaying then
-		diveTrack:Stop(0.12)
-	end
-
+	-- 5. NO RECOVERY DELAY, NO CRAWLING SPEED!
+	-- Instantly re-enable jumping and restore standard movement speed (14 walk / 21 sprint)
 	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 	isDiving = false
-	syncMovementTracks()
+
+	local isMoving = activeHum.MoveDirection.Magnitude > 0.05
+	local wantSprint = isHoldingShift and isMoving and (not exhaustedLockout) and (currentEnergy > 0)
+	activeHum.WalkSpeed = wantSprint and SPRINT_WALK_SPEED or BASE_WALK_SPEED
+
+	-- Resume normal movement / upright idle animation with 0s transition gap
+	syncMovementTracks(true)
+	local normalStandingTime = os.clock()
+
+	-- Diagnostics: Check if any dive track is still playing
+	local isDiveStillPlaying = (diveTrack and diveTrack.IsPlaying) or false
+	if animator then
+		for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+			if tr.Animation and tr.Animation.AnimationId == currentDiveAnimId and tr.IsPlaying then
+				isDiveStillPlaying = true
+			end
+		end
+	end
+
+	print(string.format("[Movement][Dive][DIAGNOSTIC] ⏱️ Dive Start: %.4f | Dive End: %.4f (Elapsed: %.4fs) | Track Stop: %.4f",
+		diveStartTime, diveEndTime, diveEndTime - diveStartTime, diveStopTime))
+	print(string.format("[Movement][Dive][DIAGNOSTIC] 📍 StartPos: (%.2f, %.2f, %.2f) | LandingPos: (%.2f, %.2f, %.2f) | Travel: %.2f studs",
+		startPos.X, startPos.Y, startPos.Z, landingPos.X, landingPos.Y, landingPos.Z, (landingPos - startPos).Magnitude))
+	print(string.format("[Movement][Dive][DIAGNOSTIC] 🧍 Upright standing/movement resumed: %.4f (Gap: %.4fs) | WalkSpeed: %.1f | DiveTrackPlaying: %s",
+		normalStandingTime, normalStandingTime - diveEndTime, activeHum.WalkSpeed, tostring(isDiveStillPlaying)))
+
+	-- 2.60s Checkpoint verification (0.35s after 2.25s end)
+	task.delay(0.35, function()
+		local checkTime = os.clock()
+		local checkDivePlaying = false
+		if diveTrack and diveTrack.IsPlaying then checkDivePlaying = true end
+		if animator then
+			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+				if tr.Animation and tr.Animation.AnimationId == currentDiveAnimId and tr.IsPlaying then
+					checkDivePlaying = true
+				end
+			end
+		end
+		local curPos = activeHRP and activeHRP.Position or Vector3.zero
+		print(string.format("[Movement][Dive][DIAGNOSTIC] 🔍 2.60s Checkpoint (Total Elapsed: %.4fs): Clock=%.4f | IsDiving=%s | WalkSpeed=%.1f | DivePlaying=%s | Pos=(%.2f, %.2f, %.2f)",
+			checkTime - diveStartTime, checkTime, tostring(isDiving), activeHum and activeHum.WalkSpeed or 0, tostring(checkDivePlaying), curPos.X, curPos.Y, curPos.Z))
+	end)
 end
 
 -- ============================================================================
@@ -5257,10 +5352,10 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 
-	-- Update White Energy Bar UI
+	-- Update Comic EP Bar UI
 	local energyRatio = math.clamp(currentEnergy / MAX_ENERGY, 0, 1)
 	energyFill.Size = UDim2.new(energyRatio, 0, 1, 0)
-	energyLabel.Text = string.format("ENERGY: %d%%", math.floor(currentEnergy))
+	energyLabel.Text = string.format("%d", math.floor(currentEnergy))
 end)
 
 print("[MovementDiveAndHUDClient] Initialized: Walk (90697464892050), Run (125757170550820), Dive (137603926461078) & Unified Stacked HUD.")

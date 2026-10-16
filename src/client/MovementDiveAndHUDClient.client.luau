@@ -53,31 +53,9 @@ local currentDiveAnimId = R6_DIVE_ANIM_ID
 
 local BASE_WALK_SPEED    = 14
 local SPRINT_WALK_SPEED  = 21
-local DIVE_FORWARD_SPEED = 32 -- Fallback speed if root motion is not available
-local DIVE_DURATION      = 0.68 -- Fallback duration if track length hasn't loaded
-
--- ============================================================================
--- DIVE TRAJECTORY & LANDING DISTANCE CONFIGURATION
--- During the dive roll, the animation plays naturally without displacement tampering.
--- In the exact millisecond the animation completes, the character lands forward at:
--- Total Distance = (DIVE_ANIMATION_BASE_DISTANCE * DIVE_FORWARD_SCALE) + DIVE_LANDING_FORWARD_OFFSET
--- ============================================================================
--- 1. DIVE_ANIMATION_BASE_DISTANCE: Base forward distance in studs authored in the animation
---    • Default: 12.0 studs (the natural travel of animation 137603926461078)
-local DIVE_ANIMATION_BASE_DISTANCE = 12.0
-
--- 2. DIVE_FORWARD_SCALE: Multiplier applied to the base animation distance
---    • 1.00 = 100% of authored animation distance (12.0 studs)
---    • Value Range: 0.50 (short 6 studs) to 1.50 (long 18 studs)
-local DIVE_FORWARD_SCALE = 1.00
-
--- 3. DIVE_LANDING_FORWARD_OFFSET: Direct forward snap adjustment applied at the landing moment (in studs)
---    • Currently set to 6.0: Total landing distance = 12.0 + 6.0 = 18.0 studs!
---    • Value Range: -6.0 to +12.0 studs
-local DIVE_LANDING_FORWARD_OFFSET = 6.0
-
--- 4. DIVE_LANDING_DELAY: Ground recovery time in seconds (0.0 = instant standing like normal)
-local DIVE_LANDING_DELAY = 0.0
+local DIVE_FORWARD_SPEED = 28 -- Forward dive impulse speed (athletic glide)
+local DIVE_DURATION      = 0.75 -- Exact 0.75s dive timeline (1.50s start -> 2.25s final frame)
+local DIVE_LANDING_DELAY = 0.0 -- 0.0s = Zero ground recovery pause, instant upright standing
 
 -- Energy Settings (White Bar)
 local MAX_ENERGY        = 100
@@ -512,7 +490,7 @@ end
 -- ============================================================================
 -- 3. CUSTOM WALK & RUN ANIMATION CONTROLLER
 -- ============================================================================
-local function syncMovementTracks()
+local function syncMovementTracks(instant: boolean?)
 	if not activeHum or activeHum.Health <= 0 or isDiving then return end
 
 	local isMoving = activeHum.MoveDirection.Magnitude > 0.05
@@ -543,28 +521,36 @@ local function syncMovementTracks()
 		lastMovementState = newState
 	end
 
+	local fadeTime = instant and 0 or 0.12
+
 	if not isMoving then
-		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.15) end
-		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.15) end
+		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(fadeTime) end
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(fadeTime) end
 	elseif wantSprint then
-		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.12) end
-		if runTrack and not runTrack.IsPlaying then runTrack:Play(0.12, 1, 1.0) end
-		-- Suppress default Animate movement tracks so custom sprint animation displays without interference
+		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(fadeTime) end
+		if runTrack and not runTrack.IsPlaying then runTrack:Play(fadeTime, 1, 1.0) end
+		-- Suppress default Animate walk/run tracks so custom sprint animation displays cleanly without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= runTrack and tr ~= diveTrack and tr ~= walkTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
-					tr:Stop(0.1)
+				if tr ~= runTrack and tr ~= diveTrack and tr ~= walkTrack then
+					local animName = tr.Name:lower()
+					if animName:find("walk") or animName:find("run") or tr.Priority == Enum.AnimationPriority.Movement then
+						tr:Stop(0.05)
+					end
 				end
 			end
 		end
 	else
-		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.12) end
-		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play(0.12, 1, 1.0) end
-		-- Suppress default Animate movement tracks so custom walk animation displays without interference
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(fadeTime) end
+		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play(fadeTime, 1, 1.0) end
+		-- Suppress default Animate walk/run tracks so custom walk animation displays cleanly without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= walkTrack and tr ~= diveTrack and tr ~= runTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
-					tr:Stop(0.1)
+				if tr ~= walkTrack and tr ~= diveTrack and tr ~= runTrack then
+					local animName = tr.Name:lower()
+					if animName:find("walk") or animName:find("run") or tr.Priority == Enum.AnimationPriority.Movement then
+						tr:Stop(0.05)
+					end
 				end
 			end
 		end
@@ -572,7 +558,7 @@ local function syncMovementTracks()
 end
 
 -- ============================================================================
--- 4. SPACEBAR DIVE WITH FORWARD LANDING CALCULATION (NO SNAP-BACK!)
+-- 4. SPACEBAR DIVE (EXACT 1.50s -> 2.25s TIMELINE, ZERO REVERSE RECOVERY)
 -- ============================================================================
 local function performRunningDive()
 	if isDiving or not activeChar or not activeHum or not activeHRP then return end
@@ -590,20 +576,22 @@ local function performRunningDive()
 	isDiving = true
 	currentEnergy = math.max(0, currentEnergy - DIVE_ENERGY_COST)
 
+	local diveStartTime = os.clock()
 	local startPos = activeHRP.Position
-	print(string.format("[Movement][Dive] 🏊 Running dive initiated! StartPos: (%.2f, %.2f, %.2f), Dir: (%.2f, 0, %.2f), Energy: %d%%",
-		startPos.X, startPos.Y, startPos.Z, flatDir.X, flatDir.Z, math.floor(currentEnergy)))
+	print(string.format("[Movement][Dive] 🏊 Dive initiated at os.clock() = %.4f | StartPos: (%.2f, %.2f, %.2f), Dir: (%.2f, 0, %.2f), Energy: %d%%",
+		diveStartTime, startPos.X, startPos.Y, startPos.Z, flatDir.X, flatDir.Z, math.floor(currentEnergy)))
 
-	-- Stop normal jump so pressing Space while running triggers Dive instead of jumping
+	-- Prevent normal jump while dive is active
 	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
 
-	if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.1) end
-	if runTrack and runTrack.IsPlaying then runTrack:Stop(0.1) end
+	-- Stop walk/run tracks immediately so they don't fight with dive track
+	if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0) end
+	if runTrack and runTrack.IsPlaying then runTrack:Stop(0) end
 
 	-- Face character cleanly in the dive direction
 	activeHRP.CFrame = CFrame.lookAt(activeHRP.Position, activeHRP.Position + flatDir)
 
-	-- Motion Design: Aerodynamic pure white motion trail during dive roll
+	-- Aerodynamic pure white motion trail during dive roll
 	local trailAtt0 = Instance.new("Attachment")
 	trailAtt0.Name = "DiveTrailAtt0"
 	trailAtt0.Position = Vector3.new(0, 1.1, 0)
@@ -636,104 +624,148 @@ local function performRunningDive()
 	local torso = activeChar:FindFirstChild("Torso") or activeChar:FindFirstChild("UpperTorso")
 	local head = activeChar:FindFirstChild("Head")
 
-	-- 1. Disable Torso and Head CanCollide during roll so rotating body parts never snag on floor
+	-- Disable Torso and Head CanCollide during roll so rotating body parts never snag on floor
 	if torso and torso:IsA("BasePart") then torso.CanCollide = false end
 	if head and head:IsA("BasePart") then head.CanCollide = false end
 
-	-- Locate RootJoint (Torso.RootJoint for R6, LowerTorso.Root for R15)
-	local rootJoint = nil
-	if torso then
-		rootJoint = torso:FindFirstChild("RootJoint") or torso:FindFirstChild("Root")
-	end
-	if not rootJoint and activeChar:FindFirstChild("LowerTorso") then
-		local lt = activeChar.LowerTorso
-		rootJoint = lt:FindFirstChild("Root") or lt:FindFirstChild("RootJoint")
+	-- Play dive animation calibrated to complete exactly at DIVE_DURATION (0.75s)
+	-- Keyframes reach final landing frame at exactly 0.75s
+	local trackLen = (diveTrack and diveTrack.Length > 0.05) and diveTrack.Length or 0.429
+	local animSpeed = trackLen / DIVE_DURATION
+	if diveTrack then
+		diveTrack.Looped = false
+		diveTrack.Priority = Enum.AnimationPriority.Action4
+		diveTrack:Play(0, 1, animSpeed)
+		print(string.format("[Movement][Dive] 🎬 DiveTrack playing (TrackLen: %.3fs, TargetDuration: %.2fs, PlaySpeed: %.3f, Priority: %s)",
+			trackLen, DIVE_DURATION, animSpeed, diveTrack.Priority.Name))
 	end
 
-	local diveDuration = 0.68
-	if diveTrack then
-		diveTrack:Play(0.06, 1, 1.0)
-		if diveTrack.Length and diveTrack.Length > 0.05 then
-			diveDuration = diveTrack.Length
-		end
-		print(string.format("[Movement][Dive] 🎬 DiveTrack playing (Length: %.2fs, Priority: %s)", diveDuration, diveTrack.Priority.Name))
-	end
+	-- Forward glide impulse via BodyVelocity
+	local bv = Instance.new("BodyVelocity")
+	bv.Name = "DiveImpulse"
+	bv.MaxForce = Vector3.new(250000, 0, 250000)
+	bv.Velocity = flatDir * DIVE_FORWARD_SPEED
+	bv.Parent = activeHRP
 
 	local rayParams = RaycastParams.new()
 	rayParams.FilterDescendantsInstances = { activeChar }
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-	-- STEP 1: Let the dive animation play completely without per-frame displacement tampering
-	local diveStartTime = os.clock()
-	while (os.clock() - diveStartTime) < diveDuration do
+	-- Forward motion loop: runs until exactly DIVE_DURATION (0.75s) has elapsed
+	while (os.clock() - diveStartTime) < DIVE_DURATION do
 		task.wait(0.02)
 		if not activeHRP or not activeHum or activeHum.Health <= 0 then break end
-	end
 
-	-- STEP 2: In the exact millisecond the animation completes, calculate and apply landing forward distance!
-	-- Formula: (DIVE_ANIMATION_BASE_DISTANCE * DIVE_FORWARD_SCALE) + DIVE_LANDING_FORWARD_OFFSET
-	local totalLandingDistance = (DIVE_ANIMATION_BASE_DISTANCE * DIVE_FORWARD_SCALE) + DIVE_LANDING_FORWARD_OFFSET
+		local elapsed = os.clock() - diveStartTime
+		local alpha = math.clamp(elapsed / DIVE_DURATION, 0, 1)
+		local curSpeed = DIVE_FORWARD_SPEED * (1 - (alpha * 0.35))
 
-	-- Wall collision safety check: prevent passing through walls/obstacles
-	local wallRay = Workspace:Raycast(startPos, flatDir * (totalLandingDistance + 1.2), rayParams)
-	if wallRay then
-		totalLandingDistance = math.max(0, wallRay.Distance - 1.2)
-	end
-
-	local targetPos = startPos + (flatDir * totalLandingDistance)
-
-	-- Floor snap raycast: ensure character lands solidly on the ground
-	local floorRay = Workspace:Raycast(targetPos + Vector3.new(0, 3, 0), Vector3.new(0, -8, 0), rayParams)
-	local hipHeight = (activeHum.RigType == Enum.HumanoidRigType.R6) and 2.8 or (activeHum.HipHeight + activeHRP.Size.Y * 0.5)
-	local targetY = floorRay and (floorRay.Position.Y + hipHeight) or targetPos.Y
-
-	local landingPos = Vector3.new(targetPos.X, targetY, targetPos.Z)
-	activeHRP.CFrame = CFrame.lookAt(landingPos, landingPos + flatDir)
-	activeHRP.AssemblyLinearVelocity = Vector3.zero
-
-	-- Instantly stop dive animation with 0s fade to eliminate reverse recovery blending
-	if diveTrack and diveTrack.IsPlaying then
-		diveTrack:Stop(0)
-	end
-
-	-- Instantly reset all character joints to clean upright standing posture
-	if activeChar then
-		for _, motor in ipairs(activeChar:GetDescendants()) do
-			if motor:IsA("Motor6D") then
-				motor.Transform = CFrame.identity
+		-- Wall obstacle check
+		local wallRay = Workspace:Raycast(activeHRP.Position, flatDir * 2.5, rayParams)
+		if wallRay then
+			bv.Velocity = Vector3.zero
+		else
+			-- Floor ahead safety check
+			local checkPos = activeHRP.Position + (flatDir * 3.0)
+			local floorAhead = Workspace:Raycast(checkPos + Vector3.new(0, 3, 0), Vector3.new(0, -8, 0), rayParams)
+			if floorAhead then
+				bv.Velocity = flatDir * curSpeed
+			else
+				bv.Velocity = Vector3.zero
 			end
 		end
 	end
 
-	print(string.format("[Movement][Dive] 🛬 Animation ended! Placed in results area: (%.2f, %.2f, %.2f), TotalTravel: %.2f studs (Base: %.1f, Scale: %.2fx, Offset: %.1f)",
-		landingPos.X, landingPos.Y, landingPos.Z, totalLandingDistance, DIVE_ANIMATION_BASE_DISTANCE, DIVE_FORWARD_SCALE, DIVE_LANDING_FORWARD_OFFSET))
+	-- AT EXACTLY 0.75s (2.25s mark): Dive animation reaches final frame!
+	local diveEndTime = os.clock()
 
-	-- Restore collision
+	-- 1. Remove impulse and stop linear velocity at actual landing position
+	if bv and bv.Parent then
+		bv:Destroy()
+	end
+	activeHRP.AssemblyLinearVelocity = Vector3.zero
+
+	-- 2. Floor alignment: ensure character lands solidly on ground at actual reached position
+	local floorRay = Workspace:Raycast(activeHRP.Position + Vector3.new(0, 3, 0), Vector3.new(0, -8, 0), rayParams)
+	if floorRay then
+		local hipHeight = (activeHum.RigType == Enum.HumanoidRigType.R6) and 2.8 or (activeHum.HipHeight + activeHRP.Size.Y * 0.5)
+		local safeY = floorRay.Position.Y + hipHeight
+		activeHRP.CFrame = CFrame.new(activeHRP.Position.X, safeY, activeHRP.Position.Z) * CFrame.Angles(0, math.atan2(-flatDir.X, -flatDir.Z), 0)
+	end
+	local landingPos = activeHRP.Position
+
+	-- 3. STOP DIVE ANIMATION IMMEDIATELY (ZERO FADE-OUT!)
+	-- A non-zero fadeTime causes Roblox to interpolate the 90+ deg dive roll backwards to 0 deg,
+	-- which visually manifests as a reverse recovery rewind. Calling Stop(0) eliminates this completely!
+	if diveTrack and diveTrack.IsPlaying then
+		diveTrack:Stop(0)
+	end
+	local diveStopTime = os.clock()
+
+	-- Stop any other lingering dive tracks on the Animator
+	local animator = activeHum:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+			if tr.Animation and tr.Animation.AnimationId == currentDiveAnimId then
+				tr:Stop(0)
+			end
+		end
+	end
+
+	-- 4. Clean up motion trail and restore body collision immediately
+	diveTrail.Enabled = false
+	Debris:AddItem(diveTrail, 0.2)
+	Debris:AddItem(trailAtt0, 0.2)
+	Debris:AddItem(trailAtt1, 0.2)
 	if torso and torso:IsA("BasePart") then torso.CanCollide = true end
 	if head and head:IsA("BasePart") then head.CanCollide = true end
 
-	-- Clean up motion trail
-	diveTrail.Enabled = false
-	Debris:AddItem(diveTrail, 0.3)
-	Debris:AddItem(trailAtt0, 0.3)
-	Debris:AddItem(trailAtt1, 0.3)
-
-	-- Ground recovery delay: only wait if user configured a delay > 0
-	if DIVE_LANDING_DELAY > 0 then
-		if activeHum and activeHum.Health > 0 then
-			activeHum.WalkSpeed = 6
-		end
-		task.wait(DIVE_LANDING_DELAY)
-	end
-
-	local finalPos = activeHRP and activeHRP.Position or Vector3.zero
-	local landingToFinalDiff = (finalPos - landingPos).Magnitude
-	print(string.format("[Movement][Dive] 🧍 Instant standing complete! FinalPos: (%.2f, %.2f, %.2f), Landing-to-Final Diff: %.4f studs (Clean Normal Standing!)",
-		finalPos.X, finalPos.Y, finalPos.Z, landingToFinalDiff))
-
+	-- 5. NO RECOVERY DELAY, NO CRAWLING SPEED!
+	-- Instantly re-enable jumping and restore standard movement speed (14 walk / 21 sprint)
 	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 	isDiving = false
-	syncMovementTracks()
+
+	local isMoving = activeHum.MoveDirection.Magnitude > 0.05
+	local wantSprint = isHoldingShift and isMoving and (not exhaustedLockout) and (currentEnergy > 0)
+	activeHum.WalkSpeed = wantSprint and SPRINT_WALK_SPEED or BASE_WALK_SPEED
+
+	-- Resume normal movement / upright idle animation with 0s transition gap
+	syncMovementTracks(true)
+	local normalStandingTime = os.clock()
+
+	-- Diagnostics: Check if any dive track is still playing
+	local isDiveStillPlaying = (diveTrack and diveTrack.IsPlaying) or false
+	if animator then
+		for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+			if tr.Animation and tr.Animation.AnimationId == currentDiveAnimId and tr.IsPlaying then
+				isDiveStillPlaying = true
+			end
+		end
+	end
+
+	print(string.format("[Movement][Dive][DIAGNOSTIC] ⏱️ Dive Start: %.4f | Dive End: %.4f (Elapsed: %.4fs) | Track Stop: %.4f",
+		diveStartTime, diveEndTime, diveEndTime - diveStartTime, diveStopTime))
+	print(string.format("[Movement][Dive][DIAGNOSTIC] 📍 StartPos: (%.2f, %.2f, %.2f) | LandingPos: (%.2f, %.2f, %.2f) | Travel: %.2f studs",
+		startPos.X, startPos.Y, startPos.Z, landingPos.X, landingPos.Y, landingPos.Z, (landingPos - startPos).Magnitude))
+	print(string.format("[Movement][Dive][DIAGNOSTIC] 🧍 Upright standing/movement resumed: %.4f (Gap: %.4fs) | WalkSpeed: %.1f | DiveTrackPlaying: %s",
+		normalStandingTime, normalStandingTime - diveEndTime, activeHum.WalkSpeed, tostring(isDiveStillPlaying)))
+
+	-- 2.60s Checkpoint verification (0.35s after 2.25s end)
+	task.delay(0.35, function()
+		local checkTime = os.clock()
+		local checkDivePlaying = false
+		if diveTrack and diveTrack.IsPlaying then checkDivePlaying = true end
+		if animator then
+			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+				if tr.Animation and tr.Animation.AnimationId == currentDiveAnimId and tr.IsPlaying then
+					checkDivePlaying = true
+				end
+			end
+		end
+		local curPos = activeHRP and activeHRP.Position or Vector3.zero
+		print(string.format("[Movement][Dive][DIAGNOSTIC] 🔍 2.60s Checkpoint (Total Elapsed: %.4fs): Clock=%.4f | IsDiving=%s | WalkSpeed=%.1f | DivePlaying=%s | Pos=(%.2f, %.2f, %.2f)",
+			checkTime - diveStartTime, checkTime, tostring(isDiving), activeHum and activeHum.WalkSpeed or 0, tostring(checkDivePlaying), curPos.X, curPos.Y, curPos.Z))
+	end)
 end
 
 -- ============================================================================

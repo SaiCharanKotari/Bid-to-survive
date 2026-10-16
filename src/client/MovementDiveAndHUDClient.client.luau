@@ -38,18 +38,21 @@ end
 -- 1. ANIMATION IDs & MOVEMENT TUNING
 -- ============================================================================
 -- R6 Custom Author Animations (Authored by sai_charank)
-local R6_WALK_ANIM_ID = "rbxassetid://90697464892050"
-local R6_RUN_ANIM_ID  = "rbxassetid://125757170550820"
-local R6_DIVE_ANIM_ID = "rbxassetid://137603926461078"
+local R6_WALK_ANIM_ID  = "rbxassetid://90697464892050"
+local R6_RUN_ANIM_ID   = "rbxassetid://125757170550820"
+local R6_DIVE_ANIM_ID  = "rbxassetid://137603926461078"
+local R6_GETUP_ANIM_ID = "rbxassetid://90005854469248"
 
 -- R15 Compatible Animations (Used if avatar spawns as R15)
-local R15_WALK_ANIM_ID = "rbxassetid://913402848"
-local R15_RUN_ANIM_ID  = "rbxassetid://913376220"
-local R15_DIVE_ANIM_ID = "rbxassetid://507765000"
+local R15_WALK_ANIM_ID  = "rbxassetid://913402848"
+local R15_RUN_ANIM_ID   = "rbxassetid://913376220"
+local R15_DIVE_ANIM_ID  = "rbxassetid://507765000"
+local R15_GETUP_ANIM_ID = "rbxassetid://90005854469248"
 
-local currentWalkAnimId = R6_WALK_ANIM_ID
-local currentRunAnimId  = R6_RUN_ANIM_ID
-local currentDiveAnimId = R6_DIVE_ANIM_ID
+local currentWalkAnimId  = R6_WALK_ANIM_ID
+local currentRunAnimId   = R6_RUN_ANIM_ID
+local currentDiveAnimId  = R6_DIVE_ANIM_ID
+local currentGetupAnimId = R6_GETUP_ANIM_ID
 
 local BASE_WALK_SPEED    = 14
 local SPRINT_WALK_SPEED  = 21
@@ -74,9 +77,12 @@ local DIVE_FORWARD_SCALE = 1.00
 -- 3. DIVE_LANDING_FORWARD_OFFSET: Direct forward snap adjustment applied at the landing moment (in studs)
 --    • 0.0 = Lands precisely where the animation roll touched down (12.0 studs total, zero visual pop)
 --    • Value Range: -6.0 to +12.0 studs (tune to adjust final resting spot)
-local DIVE_LANDING_FORWARD_OFFSET = 6.0
+local DIVE_LANDING_FORWARD_OFFSET = 0.0
 
--- 4. DIVE_LANDING_DELAY: Ground recovery time in seconds (0.0 = instant standing like normal)
+-- 4. DIVE_GETUP_DURATION: Duration in seconds to play the standing/getup animation (0.18s)
+local DIVE_GETUP_DURATION = 0.18
+
+-- 5. DIVE_LANDING_DELAY: Additional ground recovery time in seconds (0.0 = instant standing like normal)
 local DIVE_LANDING_DELAY = 0.0
 
 -- Energy Settings (White Bar)
@@ -99,6 +105,7 @@ local activeHRP: BasePart? = nil
 local walkTrack: AnimationTrack? = nil
 local runTrack: AnimationTrack? = nil
 local diveTrack: AnimationTrack? = nil
+local getupTrack: AnimationTrack? = nil
 local healthConn: RBXScriptConnection? = nil
 
 -- ============================================================================
@@ -552,7 +559,7 @@ local function syncMovementTracks()
 		-- Suppress default Animate movement tracks so custom sprint animation displays without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= runTrack and tr ~= diveTrack and tr ~= walkTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
+				if tr ~= runTrack and tr ~= diveTrack and tr ~= walkTrack and tr ~= getupTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
 					tr:Stop(0.1)
 				end
 			end
@@ -563,7 +570,7 @@ local function syncMovementTracks()
 		-- Suppress default Animate movement tracks so custom walk animation displays without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= walkTrack and tr ~= diveTrack and tr ~= runTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
+				if tr ~= walkTrack and tr ~= diveTrack and tr ~= runTrack and tr ~= getupTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
 					tr:Stop(0.1)
 				end
 			end
@@ -693,7 +700,7 @@ local function performRunningDive()
 	activeHRP.CFrame = CFrame.lookAt(landingPos, landingPos + flatDir)
 	activeHRP.AssemblyLinearVelocity = Vector3.zero
 
-	-- STEP 3: INSTANTLY CUT RECOVERY ANIMATION & MAKE HIM STAND!
+	-- STEP 3: STOP DIVE ANIMATION & PLAY NEW STANDING/GETUP ANIMATION (90005854469248 for 0.18s)
 	-- 1. Stop dive animation track immediately with 0s fade
 	if diveTrack then
 		diveTrack:Stop(0)
@@ -702,36 +709,22 @@ local function performRunningDive()
 		end)
 	end
 
-	-- 2. Stop any lingering Action tracks that might hold recovery poses
+	-- 2. Stop any lingering Action tracks that might interfere
 	if activeHum then
 		for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-			if tr ~= walkTrack and tr ~= runTrack and (tr.Priority == Enum.AnimationPriority.Action or tr.Priority == Enum.AnimationPriority.Action4) then
+			if tr ~= walkTrack and tr ~= runTrack and tr ~= getupTrack and (tr.Priority == Enum.AnimationPriority.Action or tr.Priority == Enum.AnimationPriority.Action4) then
 				tr:Stop(0)
 			end
 		end
 	end
 
-	-- 3. CUT RECOVERY: Enforce crisp upright standing posture across all Motor6D joints for ~15 frames (0.25s)
-	-- Roblox's Animator engine internally blends stopped tracks over ~0.25s.
-	-- Overriding Motor6D.Transform in RunService.Stepped locks the character upright instantly with ZERO reverse rewind!
-	local recoveryLockConn = nil
-	local lockFrames = 0
-	recoveryLockConn = RunService.Stepped:Connect(function()
-		lockFrames += 1
-		if activeChar and activeChar.Parent and activeHum and activeHum.Health > 0 then
-			for _, motor in ipairs(activeChar:GetDescendants()) do
-				if motor:IsA("Motor6D") then
-					motor.Transform = CFrame.identity
-				end
-			end
-		end
-		if lockFrames >= 15 then
-			if recoveryLockConn then
-				recoveryLockConn:Disconnect()
-				recoveryLockConn = nil
-			end
-		end
-	end)
+	-- 3. Play the getup / standing animation (90005854469248) scaled for exactly 0.18s
+	if getupTrack then
+		local getupSpeed = (getupTrack.Length and getupTrack.Length > 0.05) and (getupTrack.Length / DIVE_GETUP_DURATION) or (0.30 / DIVE_GETUP_DURATION)
+		getupTrack:Play(0.02, 1, getupSpeed)
+		print(string.format("[Movement][Dive] 🧍 Playing getup animation (ID: %s, Length: %.2fs, Duration: %.2fs, Speed: %.2fx)",
+			currentGetupAnimId, getupTrack.Length or 0.30, DIVE_GETUP_DURATION, getupSpeed))
+	end
 
 	print(string.format("[Movement][Dive] 🛬 Animation ended! Placed in results area: (%.2f, %.2f, %.2f), TotalTravel: %.2f studs (Base: %.1f, Scale: %.2fx, Offset: %.1f)",
 		landingPos.X, landingPos.Y, landingPos.Z, totalLandingDistance, DIVE_ANIMATION_BASE_DISTANCE, DIVE_FORWARD_SCALE, DIVE_LANDING_FORWARD_OFFSET))
@@ -746,7 +739,12 @@ local function performRunningDive()
 	Debris:AddItem(trailAtt0, 0.3)
 	Debris:AddItem(trailAtt1, 0.3)
 
-	-- Ground recovery delay: only wait if user configured a delay > 0
+	-- Wait for the 0.18s getup animation to finish rising into full standing posture
+	if DIVE_GETUP_DURATION > 0 then
+		task.wait(DIVE_GETUP_DURATION)
+	end
+
+	-- Ground recovery delay: only wait if user configured an additional delay > 0
 	if DIVE_LANDING_DELAY > 0 then
 		if activeHum and activeHum.Health > 0 then
 			activeHum.WalkSpeed = 6
@@ -756,7 +754,7 @@ local function performRunningDive()
 
 	local finalPos = activeHRP and activeHRP.Position or Vector3.zero
 	local landingToFinalDiff = (finalPos - landingPos).Magnitude
-	print(string.format("[Movement][Dive] 🧍 Instant standing complete! FinalPos: (%.2f, %.2f, %.2f), Landing-to-Final Diff: %.4f studs (Clean Normal Standing!)",
+	print(string.format("[Movement][Dive] 🧍 Getup complete! FinalPos: (%.2f, %.2f, %.2f), Landing-to-Final Diff: %.4f studs (Clean Normal Standing!)",
 		finalPos.X, finalPos.Y, finalPos.Z, landingToFinalDiff))
 
 	activeHum:ChangeState(Enum.HumanoidStateType.Running)
@@ -805,15 +803,17 @@ local function setupCharacter(character: Model)
 	print(string.format("[Movement][Init] 👤 Setting up character: %s | RigType: %s", character.Name, rigType.Name))
 
 	if rigType == Enum.HumanoidRigType.R6 then
-		currentWalkAnimId = R6_WALK_ANIM_ID
-		currentRunAnimId  = R6_RUN_ANIM_ID
-		currentDiveAnimId = R6_DIVE_ANIM_ID
-		print(string.format("[Movement][Init] ✅ R6 Avatar detected! Loading custom animations:\n  • Walk: %s\n  • Run: %s\n  • Dive: %s", currentWalkAnimId, currentRunAnimId, currentDiveAnimId))
+		currentWalkAnimId  = R6_WALK_ANIM_ID
+		currentRunAnimId   = R6_RUN_ANIM_ID
+		currentDiveAnimId  = R6_DIVE_ANIM_ID
+		currentGetupAnimId = R6_GETUP_ANIM_ID
+		print(string.format("[Movement][Init] ✅ R6 Avatar detected! Loading custom animations:\n  • Walk: %s\n  • Run: %s\n  • Dive: %s\n  • Getup: %s", currentWalkAnimId, currentRunAnimId, currentDiveAnimId, currentGetupAnimId))
 	else
-		currentWalkAnimId = R15_WALK_ANIM_ID
-		currentRunAnimId  = R15_RUN_ANIM_ID
-		currentDiveAnimId = R15_DIVE_ANIM_ID
-		warn(string.format("[Movement][Init] ⚠️ R15 Avatar detected! The custom animations (90697464892050, 125757170550820, 137603926461078) were authored for R6 (Torso, Left/Right Arm, Left/Right Leg) and cannot articulate R15 bones. Loaded R15-compatible animations:\n  • Walk: %s\n  • Run: %s\n  • Dive: %s\n  💡 TIP: To use your custom animations, keep StarterPlayer.StarterCharacter as R6 or set Game Settings -> Avatar -> R6.", currentWalkAnimId, currentRunAnimId, currentDiveAnimId))
+		currentWalkAnimId  = R15_WALK_ANIM_ID
+		currentRunAnimId   = R15_RUN_ANIM_ID
+		currentDiveAnimId  = R15_DIVE_ANIM_ID
+		currentGetupAnimId = R15_GETUP_ANIM_ID
+		warn(string.format("[Movement][Init] ⚠️ R15 Avatar detected! Loaded R15 animations:\n  • Walk: %s\n  • Run: %s\n  • Dive: %s\n  • Getup: %s", currentWalkAnimId, currentRunAnimId, currentDiveAnimId, currentGetupAnimId))
 	end
 
 	-- 1. Disable default Roblox 'Animate' script's walk/run interference on R6
@@ -850,8 +850,11 @@ local function setupCharacter(character: Model)
 		local diveAnim = Instance.new("Animation")
 		diveAnim.AnimationId = currentDiveAnimId
 
+		local getupAnim = Instance.new("Animation")
+		getupAnim.AnimationId = currentGetupAnimId
+
 		pcall(function()
-			ContentProvider:PreloadAsync({ walkAnim, runAnim, diveAnim })
+			ContentProvider:PreloadAsync({ walkAnim, runAnim, diveAnim, getupAnim })
 		end)
 
 		walkTrack = animator:LoadAnimation(walkAnim)
@@ -866,16 +869,21 @@ local function setupCharacter(character: Model)
 		diveTrack.Priority = Enum.AnimationPriority.Action4
 		diveTrack.Looped = false
 
-		-- Yield in loop until all 3 track lengths are strictly > 0s (up to 5s timeout)
+		getupTrack = animator:LoadAnimation(getupAnim)
+		getupTrack.Priority = Enum.AnimationPriority.Action4
+		getupTrack.Looped = false
+
+		-- Yield in loop until all 4 track lengths are strictly > 0s (up to 5s timeout)
 		local loadStart = os.clock()
-		while (walkTrack.Length <= 0 or runTrack.Length <= 0 or diveTrack.Length <= 0) and (os.clock() - loadStart < 5.0) do
+		while (walkTrack.Length <= 0 or runTrack.Length <= 0 or diveTrack.Length <= 0 or getupTrack.Length <= 0) and (os.clock() - loadStart < 5.0) do
 			task.wait(0.05)
 		end
 
-		print(string.format("[Movement][Init] 🎬 Tracks loaded on Animator:\n  • WalkTrack: Length=%.2fs, Priority=%s, Looped=%s\n  • RunTrack:  Length=%.2fs, Priority=%s, Looped=%s\n  • DiveTrack: Length=%.2fs, Priority=%s, Looped=%s",
+		print(string.format("[Movement][Init] 🎬 Tracks loaded on Animator:\n  • WalkTrack: Length=%.2fs, Priority=%s, Looped=%s\n  • RunTrack:  Length=%.2fs, Priority=%s, Looped=%s\n  • DiveTrack: Length=%.2fs, Priority=%s, Looped=%s\n  • GetupTrack: Length=%.2fs, Priority=%s, Looped=%s",
 			walkTrack and walkTrack.Length or 0, walkTrack and walkTrack.Priority.Name or "nil", tostring(walkTrack and walkTrack.Looped),
 			runTrack and runTrack.Length or 0, runTrack and runTrack.Priority.Name or "nil", tostring(runTrack and runTrack.Looped),
-			diveTrack and diveTrack.Length or 0, diveTrack and diveTrack.Priority.Name or "nil", tostring(diveTrack and diveTrack.Looped)))
+			diveTrack and diveTrack.Length or 0, diveTrack and diveTrack.Priority.Name or "nil", tostring(diveTrack and diveTrack.Looped),
+			getupTrack and getupTrack.Length or 0, getupTrack and getupTrack.Priority.Name or "nil", tostring(getupTrack and getupTrack.Looped)))
 
 		-- Step 2 Completion Check: Verify Workspace Map and Ruins Door are ready on client
 		task.spawn(function()

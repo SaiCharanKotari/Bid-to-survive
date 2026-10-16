@@ -72,8 +72,8 @@ local DIVE_ANIMATION_BASE_DISTANCE = 12.0
 local DIVE_FORWARD_SCALE = 1.00
 
 -- 3. DIVE_LANDING_FORWARD_OFFSET: Direct forward snap adjustment applied at the landing moment (in studs)
---    • Currently set to 6.0: Total landing distance = 12.0 + 6.0 = 18.0 studs!
---    • Value Range: -6.0 to +12.0 studs
+--    • 0.0 = Lands precisely where the animation roll touched down (12.0 studs total, zero visual pop)
+--    • Value Range: -6.0 to +12.0 studs (tune to adjust final resting spot)
 local DIVE_LANDING_FORWARD_OFFSET = 6.0
 
 -- 4. DIVE_LANDING_DELAY: Ground recovery time in seconds (0.0 = instant standing like normal)
@@ -640,23 +640,15 @@ local function performRunningDive()
 	if torso and torso:IsA("BasePart") then torso.CanCollide = false end
 	if head and head:IsA("BasePart") then head.CanCollide = false end
 
-	-- Locate RootJoint (HumanoidRootPart.RootJoint for R6, Torso/LowerTorso for R15)
+	-- Locate RootJoint (Torso.RootJoint for R6, LowerTorso.Root for R15)
 	local rootJoint = nil
-	if activeHRP then
-		rootJoint = activeHRP:FindFirstChild("RootJoint") or activeHRP:FindFirstChild("Root")
-	end
-	if not rootJoint and torso then
+	if torso then
 		rootJoint = torso:FindFirstChild("RootJoint") or torso:FindFirstChild("Root")
 	end
 	if not rootJoint and activeChar:FindFirstChild("LowerTorso") then
 		local lt = activeChar.LowerTorso
 		rootJoint = lt:FindFirstChild("Root") or lt:FindFirstChild("RootJoint")
 	end
-
-	-- Lock walk speed during dive so player inputs don't introduce extraneous walking velocity
-	local prevWalkSpeed = activeHum.WalkSpeed
-	activeHum.WalkSpeed = 0
-	activeHum:Move(Vector3.zero, false)
 
 	local diveDuration = 0.428
 	if diveTrack then
@@ -671,41 +663,13 @@ local function performRunningDive()
 	rayParams.FilterDescendantsInstances = { activeChar }
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-	-- STEP 1: Prevent underground clipping during dive roll by dynamically clamping Torso height above floor
-	local diveSteppedConn = nil
-	diveSteppedConn = RunService.Stepped:Connect(function()
-		if rootJoint and torso and activeHRP then
-			local t = rootJoint.Transform
-			local p = t.Position
-			local floorRay = Workspace:Raycast(torso.Position + Vector3.new(0, 2, 0), Vector3.new(0, -6, 0), rayParams)
-			if floorRay then
-				local minAllowedTorsoY = floorRay.Position.Y + 0.65
-				local currentTorsoY = torso.Position.Y
-				if currentTorsoY < minAllowedTorsoY then
-					local correction = minAllowedTorsoY - currentTorsoY
-					local newZ = p.Z + correction
-					local rx, ry, rz = t:ToOrientation()
-					rootJoint.Transform = CFrame.new(p.X, p.Y, newZ) * CFrame.Angles(rx, ry, rz)
-				elseif p.Z < -1.85 then
-					local rx, ry, rz = t:ToOrientation()
-					rootJoint.Transform = CFrame.new(p.X, p.Y, -1.85) * CFrame.Angles(rx, ry, rz)
-				end
-			elseif p.Z < -1.85 then
-				local rx, ry, rz = t:ToOrientation()
-				rootJoint.Transform = CFrame.new(p.X, p.Y, -1.85) * CFrame.Angles(rx, ry, rz)
-			end
-		end
-	end)
-
+	-- STEP 1: Let the dive animation play completely without per-frame displacement tampering
+	-- Yield until the exact moment the forward dive roll finishes (right before Animator's auto fade-out)
 	local diveStartTime = os.clock()
-	while (os.clock() - diveStartTime) < diveDuration do
-		task.wait(0.016)
+	local targetDuration = math.max(0.05, diveDuration - 0.02)
+	while (os.clock() - diveStartTime) < targetDuration do
+		task.wait(0.015)
 		if not activeHRP or not activeHum or activeHum.Health <= 0 then break end
-	end
-
-	if diveSteppedConn then
-		diveSteppedConn:Disconnect()
-		diveSteppedConn = nil
 	end
 
 	-- STEP 2: In the exact millisecond the animation completes, calculate and apply landing forward distance!
@@ -729,29 +693,42 @@ local function performRunningDive()
 	activeHRP.CFrame = CFrame.lookAt(landingPos, landingPos + flatDir)
 	activeHRP.AssemblyLinearVelocity = Vector3.zero
 
-	-- Instantly stop dive animation with 0s fade
-	if diveTrack and diveTrack.IsPlaying then
+	-- STEP 3: INSTANTLY CUT RECOVERY ANIMATION & MAKE HIM STAND!
+	-- 1. Stop dive animation track immediately with 0s fade
+	if diveTrack then
 		diveTrack:Stop(0)
+		pcall(function()
+			diveTrack:AdjustWeight(0, 0)
+		end)
 	end
 
-	-- STEP 3: Complete elimination of reverse recovery animation!
-	-- Maintain a brief Stepped lock to force all character joints into upright standing posture,
-	-- overriding the Animator's internal fade-out blending so there is zero reverse rewind!
+	-- 2. Stop any lingering Action tracks that might hold recovery poses
+	if activeHum then
+		for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
+			if tr ~= walkTrack and tr ~= runTrack and (tr.Priority == Enum.AnimationPriority.Action or tr.Priority == Enum.AnimationPriority.Action4) then
+				tr:Stop(0)
+			end
+		end
+	end
+
+	-- 3. CUT RECOVERY: Enforce crisp upright standing posture across all Motor6D joints for ~15 frames (0.25s)
+	-- Roblox's Animator engine internally blends stopped tracks over ~0.25s.
+	-- Overriding Motor6D.Transform in RunService.Stepped locks the character upright instantly with ZERO reverse rewind!
+	local recoveryLockConn = nil
 	local lockFrames = 0
-	local lockConn = nil
-	lockConn = RunService.Stepped:Connect(function()
+	recoveryLockConn = RunService.Stepped:Connect(function()
 		lockFrames += 1
-		if activeChar then
+		if activeChar and activeChar.Parent and activeHum and activeHum.Health > 0 then
 			for _, motor in ipairs(activeChar:GetDescendants()) do
 				if motor:IsA("Motor6D") then
 					motor.Transform = CFrame.identity
 				end
 			end
 		end
-		if lockFrames >= 10 then
-			if lockConn then
-				lockConn:Disconnect()
-				lockConn = nil
+		if lockFrames >= 15 then
+			if recoveryLockConn then
+				recoveryLockConn:Disconnect()
+				recoveryLockConn = nil
 			end
 		end
 	end)
@@ -769,18 +746,23 @@ local function performRunningDive()
 	Debris:AddItem(trailAtt0, 0.3)
 	Debris:AddItem(trailAtt1, 0.3)
 
-	-- STEP 4: Remove recovery character time completely - instant stand to normal position!
-	activeHum:ChangeState(Enum.HumanoidStateType.Running)
-	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-	isDiving = false
-
-	-- Instantly restore normal walk/sprint speed and animations
-	syncMovementTracks()
+	-- Ground recovery delay: only wait if user configured a delay > 0
+	if DIVE_LANDING_DELAY > 0 then
+		if activeHum and activeHum.Health > 0 then
+			activeHum.WalkSpeed = 6
+		end
+		task.wait(DIVE_LANDING_DELAY)
+	end
 
 	local finalPos = activeHRP and activeHRP.Position or Vector3.zero
 	local landingToFinalDiff = (finalPos - landingPos).Magnitude
 	print(string.format("[Movement][Dive] 🧍 Instant standing complete! FinalPos: (%.2f, %.2f, %.2f), Landing-to-Final Diff: %.4f studs (Clean Normal Standing!)",
 		finalPos.X, finalPos.Y, finalPos.Z, landingToFinalDiff))
+
+	activeHum:ChangeState(Enum.HumanoidStateType.Running)
+	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+	isDiving = false
+	syncMovementTracks()
 end
 
 -- ============================================================================

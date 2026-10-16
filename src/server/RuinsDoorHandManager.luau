@@ -80,8 +80,8 @@ local BASE_EMERGE_WRIST = BASE_EMERGE_ARM:PointToWorldSpace(ARM_WRIST_LOCAL)
 local BASE_EMERGE_HAND = CFrame.new(BASE_EMERGE_WRIST) * (BASE_EMERGE_ARM.Rotation * BASE_EMERGE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
 
 local POSES = {
-	DoorOrigin = toStudioCFrame(Vector3.new(-258.076, 102.018, -30.455), Vector3.new(-90, -90, 0)),
-	DoorOpen   = toStudioCFrame(Vector3.new(-258.076, 102.018, -77.145), Vector3.new(-90, -90, 0)),
+	DoorOrigin = toStudioCFrame(Vector3.new(-258.076, 112.776, -30.455), Vector3.new(-90, -90, 0)),
+	DoorOpen   = toStudioCFrame(Vector3.new(-258.076, 112.776, -77.145), Vector3.new(-90, -90, 0)),
 
 	BlackHoleTargetScale = 3.804,
 	PortalShoulderPivot  = Vector3.new(-258.0, 104.0, -25.0),

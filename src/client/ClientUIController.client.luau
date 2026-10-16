@@ -94,6 +94,10 @@ local HasSubmitted = false
 local IsRoulettePlaying = false
 local CurrentShakeConn = nil
 
+local function IsActiveInRound()
+    return (not IsAFK) and (CurrentParticipationState == "Active")
+end
+
 -- Known verified base hammer asset (Rare is 100% loaded and verified on Roblox CDN)
 local VERIFIED_BASE_HAMMER = "rbxassetid://99122878797775"
 local PendingAssets = {}
@@ -137,7 +141,7 @@ local function applySVG3ButtonStyle(button: TextButton, labelText: string, textS
         stroke.Parent = button
     end
     stroke.Color = Color3.fromRGB(0, 0, 0)
-    stroke.Thickness = 5
+    stroke.Thickness = 4
     stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     stroke.LineJoinMode = Enum.LineJoinMode.Miter
 
@@ -168,7 +172,7 @@ local function applySVG3ButtonStyle(button: TextButton, labelText: string, textS
     end
     label.Text = labelText
     label.Font = Enum.Font.GothamMedium
-    label.TextSize = textSize or 28
+    label.TextSize = textSize or 24
     label.TextColor3 = Color3.fromRGB(255, 255, 255)
     label.TextXAlignment = Enum.TextXAlignment.Center
     label.TextYAlignment = Enum.TextYAlignment.Center
@@ -177,8 +181,8 @@ end
 local centerActionDock = gui:FindFirstChild("CenterActionDock") or gui:FindFirstChild("ReopenContainer") or Instance.new("Frame")
 centerActionDock.Name = "CenterActionDock"
 centerActionDock.AnchorPoint = Vector2.new(0.5, 0.5)
-centerActionDock.Position = UDim2.new(0.5, 0, 0.42, 0) -- Exactly middle and slightly UP
-centerActionDock.Size = UDim2.new(0, 460, 0, 62)
+centerActionDock.Position = UDim2.new(0.5, 0, 0.25, 0) -- Exactly middle of upper half (Y = 0.25)
+centerActionDock.Size = UDim2.new(0, 184, 0, 50) -- Compact footprint
 centerActionDock.BackgroundTransparency = 1
 centerActionDock.ZIndex = 35
 centerActionDock.Visible = false
@@ -189,35 +193,56 @@ local reopenContainer = centerActionDock -- Backward compatibility alias
 local reopenBidBtn = centerActionDock:FindFirstChild("ReopenBidBtn") or Instance.new("TextButton")
 reopenBidBtn.Name = "ReopenBidBtn"
 reopenBidBtn.AnchorPoint = Vector2.new(0.5, 0.5)
-reopenBidBtn.Size = UDim2.new(0, 210, 0, 62)
-reopenBidBtn.Position = UDim2.new(0.5, -118, 0.5, 0)
+reopenBidBtn.Size = UDim2.new(0, 184, 0, 50)
+reopenBidBtn.Position = UDim2.new(0.5, 0, 0.5, 0) -- Dead-center inside dock
 reopenBidBtn.ZIndex = 36
 reopenBidBtn.Visible = false
 reopenBidBtn.Parent = centerActionDock
-applySVG3ButtonStyle(reopenBidBtn, "BID", 28)
+applySVG3ButtonStyle(reopenBidBtn, "BID", 24)
 
 local reopenRankBtn = centerActionDock:FindFirstChild("ReopenRankBtn") or Instance.new("TextButton")
 reopenRankBtn.Name = "ReopenRankBtn"
 reopenRankBtn.AnchorPoint = Vector2.new(0.5, 0.5)
-reopenRankBtn.Size = UDim2.new(0, 210, 0, 62)
-reopenRankBtn.Position = UDim2.new(0.5, 118, 0.5, 0)
+reopenRankBtn.Size = UDim2.new(0, 184, 0, 50)
+reopenRankBtn.Position = UDim2.new(0.5, 0, 0.5, 0) -- Exact same position!
 reopenRankBtn.ZIndex = 36
 reopenRankBtn.Visible = false
 reopenRankBtn.Parent = centerActionDock
-applySVG3ButtonStyle(reopenRankBtn, "LEADERBOARD", 20)
+applySVG3ButtonStyle(reopenRankBtn, "LEADERBOARD", 18)
 
-local function updateCenterDockLayout()
-    local bidVis = reopenBidBtn.Visible
-    local rankVis = reopenRankBtn.Visible
-    centerActionDock.Visible = (bidVis or rankVis)
-    if bidVis and rankVis then
-        reopenBidBtn.Position = UDim2.new(0.5, -118, 0.5, 0)
-        reopenRankBtn.Position = UDim2.new(0.5, 118, 0.5, 0)
-    elseif bidVis then
-        reopenBidBtn.Position = UDim2.new(0.5, 0, 0.5, 0)
-    elseif rankVis then
-        reopenRankBtn.Position = UDim2.new(0.5, 0, 0.5, 0)
+-- Authoritative visibility controller: strictly dictates BID and LEADERBOARD presence based on game state
+local function updateActionButtonsVisibility()
+    -- Never show action buttons to AFK players, lobby players, or eliminated/inactive spectators
+    if (not IsActiveInRound()) or IsAFK or (CurrentParticipationState ~= "Active") then
+        reopenBidBtn.Visible = false
+        reopenRankBtn.Visible = false
+        centerActionDock.Visible = false
+        return
     end
+
+    if CurrentPhase == "Phase3_Bid" then
+        -- During bidding, show BID button ONLY when bidding modal is closed
+        local showBid = not biddingModal.Visible
+        reopenBidBtn.Visible = showBid
+        reopenRankBtn.Visible = false
+        centerActionDock.Visible = showBid
+    elseif CurrentPhase == "Phase4_Reveal" then
+        -- During results/rankings, show LEADERBOARD button in exact same spot ONLY when rankings modal is closed
+        local showRank = not rankingsModal.Visible
+        reopenBidBtn.Visible = false
+        reopenRankBtn.Visible = showRank
+        centerActionDock.Visible = showRank
+    else
+        -- All other phases (Lobby countdown, hammer roulette, voting, tile scramble, smash, settlement, match over): HIDDEN
+        reopenBidBtn.Visible = false
+        reopenRankBtn.Visible = false
+        centerActionDock.Visible = false
+    end
+end
+
+-- Compatibility wrapper
+local function updateCenterDockLayout()
+    updateActionButtonsVisibility()
 end
 
 local rouletteContainer = gui:FindFirstChild("RouletteContainer") or Instance.new("Frame")
@@ -305,10 +330,6 @@ end
 --------------------------------------------------------------------------------
 -- 3. STATE AND UI ISOLATION HELPERS
 --------------------------------------------------------------------------------
-local function IsActiveInRound()
-    return (not IsAFK) and (CurrentParticipationState == "Active")
-end
-
 local function IsInPlayground()
     return IsActiveInRound() and (CurrentPhase ~= "Intermission") and (CurrentPhase ~= "MatchOver")
 end
@@ -377,17 +398,33 @@ if rarityBadge then
 end
 
 --------------------------------------------------------------------------------
--- SETTINGS GEAR & AFK TOGGLE BUTTON (COMIC POP-ART STYLE MATCHING SVG.2)
+-- SETTINGS GEAR & AFK TOGGLE BUTTON (MIDDLE-LEFT DOCK)
 --------------------------------------------------------------------------------
-local settingsButton = gui:FindFirstChild("SettingsButton") or Instance.new("ImageButton")
+-- Clean up any legacy top-left instances directly under gui to prevent duplicates
+local legacySettings = gui:FindFirstChild("SettingsButton")
+if legacySettings and legacySettings.Parent == gui then legacySettings:Destroy() end
+local legacyAFK = gui:FindFirstChild("AFKButton")
+if legacyAFK and legacyAFK.Parent == gui then legacyAFK:Destroy() end
+
+local leftControlsDock = gui:FindFirstChild("LeftControlsDock") or Instance.new("Frame")
+leftControlsDock.Name = "LeftControlsDock"
+leftControlsDock.AnchorPoint = Vector2.new(0, 0.5)
+leftControlsDock.Position = UDim2.new(0, 24, 0.5, 0) -- Responsive middle-left with safe margins
+leftControlsDock.Size = UDim2.new(0, 134, 0, 84)
+leftControlsDock.BackgroundTransparency = 1
+leftControlsDock.ZIndex = 20
+leftControlsDock.Parent = gui
+
+local settingsButton = leftControlsDock:FindFirstChild("SettingsButton") or Instance.new("ImageButton")
 settingsButton.Name = "SettingsButton"
-settingsButton.Size = UDim2.new(0, 48, 0, 48)
-settingsButton.Position = UDim2.new(0, 24, 0, 24)
+settingsButton.AnchorPoint = Vector2.new(0, 0)
+settingsButton.Position = UDim2.new(0, 0, 0, 0)
+settingsButton.Size = UDim2.new(0, 36, 0, 36) -- Compact 36x36 (down from 48x48)
 settingsButton.BackgroundTransparency = 1
 settingsButton.Image = "rbxassetid://6031280882" -- Clean vector gear icon
-settingsButton.ImageColor3 = Color3.fromRGB(30, 30, 30)
-settingsButton.ZIndex = 20
-settingsButton.Parent = gui
+settingsButton.ImageColor3 = Color3.fromRGB(240, 240, 240)
+settingsButton.ZIndex = 21
+settingsButton.Parent = leftControlsDock
 
 settingsButton.MouseButton1Click:Connect(function()
     pcall(function()
@@ -395,14 +432,15 @@ settingsButton.MouseButton1Click:Connect(function()
     end)
 end)
 
-local afkButton = gui:FindFirstChild("AFKButton") or Instance.new("TextButton")
+local afkButton = leftControlsDock:FindFirstChild("AFKButton") or Instance.new("TextButton")
 afkButton.Name = "AFKButton"
-afkButton.Size = UDim2.new(0, 152, 0, 48)
-afkButton.Position = UDim2.new(0, 24, 0, 84)
-afkButton.Font = Enum.Font.GothamBlack
-afkButton.TextSize = 18
+afkButton.AnchorPoint = Vector2.new(0, 0)
+afkButton.Position = UDim2.new(0, 0, 0, 44) -- Directly below Settings with clean 8px gap
+afkButton.Size = UDim2.new(0, 130, 0, 34) -- Compact 130x34 (target: 125-135px wide, 32-38px tall)
+afkButton.Font = Enum.Font.GothamBold
+afkButton.TextSize = 14 -- Restrained, clear font size
 afkButton.TextColor3 = Color3.fromRGB(0, 0, 0)
-afkButton.ZIndex = 20
+afkButton.ZIndex = 21
 afkButton.AutoButtonColor = false
 
 local afkCorner = afkButton:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
@@ -410,23 +448,23 @@ afkCorner.CornerRadius = UDim.new(0, 4)
 afkCorner.Parent = afkButton
 
 local afkStroke = afkButton:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-afkStroke.Thickness = 3
+afkStroke.Thickness = 2 -- Reduced from heavy 3px to clean 2px
 afkStroke.Color = Color3.fromRGB(0, 0, 0)
 afkStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 afkStroke.Parent = afkButton
 
 local function UpdateAFKVisual()
     if IsAFK then
-        afkButton.BackgroundColor3 = Color3.fromRGB(255, 221, 0) -- Yellow when ON
-        afkButton.Text = "AFK:ON"
+        afkButton.BackgroundColor3 = Color3.fromRGB(255, 215, 0) -- Yellow when ON
+        afkButton.Text = "AFK: ON" -- Text with clean space as requested
     else
-        afkButton.BackgroundColor3 = Color3.fromRGB(0, 220, 80) -- Green when OFF
-        afkButton.Text = "AFK:OFF"
+        afkButton.BackgroundColor3 = Color3.fromRGB(0, 200, 80) -- Clean green when OFF
+        afkButton.Text = "AFK: OFF"
     end
 end
 
 UpdateAFKVisual()
-afkButton.Parent = gui
+afkButton.Parent = leftControlsDock
 
 afkButton.MouseButton1Click:Connect(function()
     IsAFK = not IsAFK
@@ -439,6 +477,7 @@ afkButton.MouseButton1Click:Connect(function()
         ForceHideAllRoundUI()
     end
     UpdateHUDVisibility()
+    updateActionButtonsVisibility()
     SetAFK:FireServer(IsAFK)
 end)
 
@@ -446,17 +485,15 @@ end)
 -- REOPEN BUTTON CLICKS
 --------------------------------------------------------------------------------
 reopenBidBtn.MouseButton1Click:Connect(function()
-    if not IsActiveInRound() then return end
+    if not IsActiveInRound() or CurrentPhase ~= "Phase3_Bid" then return end
     biddingModal.Visible = true
-    reopenBidBtn.Visible = false
-    updateCenterDockLayout()
+    updateActionButtonsVisibility()
 end)
 
 reopenRankBtn.MouseButton1Click:Connect(function()
-    if not IsActiveInRound() then return end
+    if not IsActiveInRound() or CurrentPhase ~= "Phase4_Reveal" then return end
     rankingsModal.Visible = true
-    reopenRankBtn.Visible = false
-    updateCenterDockLayout()
+    updateActionButtonsVisibility()
 end)
 
 --------------------------------------------------------------------------------
@@ -633,6 +670,8 @@ StatsUpdated.OnClientEvent:Connect(function(stats)
     UpdateHUDVisibility()
     if not IsActiveInRound() then
         ForceHideAllRoundUI()
+    else
+        updateActionButtonsVisibility()
     end
 end)
 
@@ -643,6 +682,8 @@ ParticipationChanged.OnClientEvent:Connect(function(newState)
     UpdateHUDVisibility()
     if not IsActiveInRound() then
         ForceHideAllRoundUI()
+    else
+        updateActionButtonsVisibility()
     end
 end)
 
@@ -699,15 +740,7 @@ StateChanged.OnClientEvent:Connect(function(data)
         end
     end
     
-    if phase == "Intermission" or phase == "MatchOver" or not IsActiveInRound() then
-        reopenBidBtn.Visible = false
-        reopenRankBtn.Visible = false
-        updateCenterDockLayout()
-    else
-        reopenBidBtn.Visible = not biddingModal.Visible
-        reopenRankBtn.Visible = not rankingsModal.Visible
-        updateCenterDockLayout()
-    end
+    updateActionButtonsVisibility()
     
     if phase == "Intermission" then
         if IsAFK then
@@ -723,6 +756,7 @@ StateChanged.OnClientEvent:Connect(function(data)
         voteModal.Visible = false
         matchOverModal.Visible = false
         rouletteContainer.Visible = false
+        updateActionButtonsVisibility()
         return
     end
     
@@ -740,6 +774,7 @@ StateChanged.OnClientEvent:Connect(function(data)
         biddingModal.Visible = false
         rankingsModal.Visible = false
         voteModal.Visible = false
+        updateActionButtonsVisibility()
         
         if rarity then
             local spinnerReel = (data.Extra and data.Extra.SpinnerReel) or data.SpinnerReel
@@ -754,12 +789,16 @@ StateChanged.OnClientEvent:Connect(function(data)
         phaseTitle.TextColor3 = Color3.fromRGB(200, 120, 255)
         infoLabel.Text = "Eliminated spectators are voting to expose 1 player's bid!"
         rouletteContainer.Visible = false
+        biddingModal.Visible = false
+        rankingsModal.Visible = false
+        updateActionButtonsVisibility()
         
     elseif phase == "Phase3_Bid" then
         topBanner.Visible = true
         phaseTitle.Text = "PHASE 3 — BID FOR SURVIVAL"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 170, 0)
         rouletteContainer.Visible = false
+        rankingsModal.Visible = false
         if data.ExposedPlayer then
             infoLabel.Text = string.format("⚠️ ALERT: %s was voted! Their bid will be EXPOSED!", data.ExposedPlayer)
             infoLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
@@ -767,27 +806,36 @@ StateChanged.OnClientEvent:Connect(function(data)
             infoLabel.Text = "Enter your secret bid! Top 50% glow neon green and survive!"
             infoLabel.TextColor3 = Color3.fromRGB(160, 175, 200)
         end
+        updateActionButtonsVisibility()
         
     elseif phase == "Phase4_Reveal" then
         topBanner.Visible = false
         biddingModal.Visible = false
+        updateActionButtonsVisibility()
         
     elseif phase == "Phase5_Scramble" then
         topBanner.Visible = true
         rankingsModal.Visible = false
         biddingModal.Visible = false
+        updateActionButtonsVisibility()
         phaseTitle.Text = "PHASE 5 — NEON SHIELD ACTIVE!"
         phaseTitle.TextColor3 = Color3.fromRGB(85, 255, 127)
         infoLabel.Text = "WINNING BIDDERS GLOW NEON GREEN AND ARE SHIELDED FROM DAMAGE!"
         
     elseif phase == "Phase6_Smash" then
         topBanner.Visible = true
+        biddingModal.Visible = false
+        rankingsModal.Visible = false
+        updateActionButtonsVisibility()
         phaseTitle.Text = "PHASE 6 — HAMMER SMASH!"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 50, 50)
         infoLabel.Text = "BRACE FOR IMPACT! NON-GLOWING PLAYERS TAKE DAMAGE!"
         
     elseif phase == "Phase7_Settlement" then
         topBanner.Visible = true
+        biddingModal.Visible = false
+        rankingsModal.Visible = false
+        updateActionButtonsVisibility()
         phaseTitle.Text = "PHASE 7 — SETTLEMENT"
         phaseTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
         infoLabel.Text = "Bids processed. Checking survival status..."
@@ -801,6 +849,7 @@ StateChanged.OnClientEvent:Connect(function(data)
         rankingsModal.Visible = false
         voteModal.Visible = false
         rouletteContainer.Visible = false
+        updateActionButtonsVisibility()
     end
 end)
 
@@ -811,14 +860,14 @@ local closeBidBtn = cardFrame:FindFirstChild("CloseBidBtn", true) or biddingModa
 if not closeBidBtn then
     closeBidBtn = Instance.new("TextButton")
     closeBidBtn.Name = "CloseBidBtn"
-    closeBidBtn.Size = UDim2.new(0, 36, 0, 34)
-    closeBidBtn.Position = UDim2.new(1, -16, 0, 14)
+    closeBidBtn.Size = UDim2.new(0, 32, 0, 30)
+    closeBidBtn.Position = UDim2.new(1, -14, 0, 12)
     closeBidBtn.AnchorPoint = Vector2.new(1, 0)
     closeBidBtn.BackgroundColor3 = Color3.fromRGB(245, 0, 0)
     closeBidBtn.Text = "X"
     closeBidBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     closeBidBtn.Font = Enum.Font.GothamBlack
-    closeBidBtn.TextSize = 20
+    closeBidBtn.TextSize = 18
     closeBidBtn.ZIndex = 26
     local cbbCorner = Instance.new("UICorner")
     cbbCorner.CornerRadius = UDim.new(0, 6)
@@ -832,14 +881,11 @@ end
 
 closeBidBtn.MouseButton1Click:Connect(function()
     biddingModal.Visible = false
-    if IsActiveInRound() then
-        reopenBidBtn.Visible = true
-        updateCenterDockLayout()
-    end
+    updateActionButtonsVisibility()
 end)
 
--- 2X Font Size for Bid Input & Strict Dot/Number Filter
-bidInput.TextSize = 36
+-- Sized proportionally for compact modal & Strict Dot/Number Filter
+bidInput.TextSize = 30
 bidInput.Font = Enum.Font.RobotoMono
 
 -- Strictly filter typed input in real-time to numbers and a single decimal point '.'
@@ -862,31 +908,56 @@ bidInput:GetPropertyChangedSignal("Text"):Connect(function()
 end)
 
 -- Exact SVG.3 Styling for Modal's BID Submit Button
-applySVG3ButtonStyle(submitBtn, "BID", 28)
+applySVG3ButtonStyle(submitBtn, "BID", 24)
 
 PromptBid.OnClientEvent:Connect(function(data)
+    CurrentPhase = "Phase3_Bid"
     if not IsActiveInRound() then
         biddingModal.Visible = false
-        reopenBidBtn.Visible = false
-        updateCenterDockLayout()
+        updateActionButtonsVisibility()
         return
     end
     HasSubmitted = false
     bidInput.Text = ""
     submittedNotice.Text = ""
-    applySVG3ButtonStyle(submitBtn, "BID", 28)
+    applySVG3ButtonStyle(submitBtn, "BID", 24)
     submitBtn.AnchorPoint = Vector2.new(0.5, 0.5)
     submitBtn.Position = UDim2.new(0.5, 0, 0.5, 0)
     submitBtn.Size = UDim2.new(1, 0, 1, 0)
     
-    biddingModal.Visible = true
-    reopenBidBtn.Visible = false
-    updateCenterDockLayout()
+    local titleLabel = cardFrame:FindFirstChild("TitleLabel")
+    if titleLabel then
+        titleLabel.AnchorPoint = Vector2.new(0.5, 0)
+        titleLabel.Position = UDim2.new(0.5, 0, 0, 26)
+        titleLabel.Size = UDim2.new(0.85, 0, 0, 32)
+    end
+
+    bidInput.AnchorPoint = Vector2.new(0.5, 0)
+    bidInput.Position = UDim2.new(0.5, 0, 0, 72)
+    bidInput.Size = UDim2.new(0, 240, 0, 42)
+    bidInput.TextSize = 24
     
-    -- Smooth pop-in animation
-    biddingModal.Size = UDim2.new(0, 540, 0, 304)
+    local btnContainer = cardFrame:FindFirstChild("BidBtnContainer")
+    if btnContainer then
+        btnContainer.AnchorPoint = Vector2.new(0.5, 0)
+        btnContainer.Position = UDim2.new(0.5, 0, 0, 134)
+        btnContainer.Size = UDim2.new(0, 180, 0, 46)
+    end
+
+    local submittedNotice = cardFrame:FindFirstChild("SubmittedNotice")
+    if submittedNotice then
+        submittedNotice.AnchorPoint = Vector2.new(0.5, 0)
+        submittedNotice.Position = UDim2.new(0.5, 0, 0, 192)
+        submittedNotice.Size = UDim2.new(0.85, 0, 0, 20)
+    end
+
+    biddingModal.Visible = true
+    updateActionButtonsVisibility()
+    
+    -- Smooth pop-in animation (compact 480x250, zero overlap)
+    biddingModal.Size = UDim2.new(0, 430, 0, 220)
     TweenService:Create(biddingModal, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 600, 0, 338)
+        Size = UDim2.new(0, 480, 0, 250)
     }):Play()
 end)
 
@@ -946,12 +1017,68 @@ submitBtn.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 10. LEADERBOARD: PREMIUM CONTENT-ADAPTIVE 4-COLUMN TABLE WITH RED X
+-- 10. LEADERBOARD: 3D EXTRUDED ORANGE STUDIO DESIGN WITH 4-COLUMN TABLE & RED X
 --------------------------------------------------------------------------------
+local function ensureRankingsStructure()
+    rankingsModal.AnchorPoint = Vector2.new(0.5, 0.5)
+    rankingsModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+    rankingsModal.BackgroundTransparency = 1
+    rankingsModal.BorderSizePixel = 0
+
+    local shadowFrame = rankingsModal:FindFirstChild("ShadowFrame") or Instance.new("Frame")
+    shadowFrame.Name = "ShadowFrame"
+    shadowFrame.Size = UDim2.new(1, -12, 1, -12)
+    shadowFrame.Position = UDim2.new(0, 12, 0, 12)
+    shadowFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    shadowFrame.BorderSizePixel = 0
+    shadowFrame.ZIndex = 20
+    local sCorner = shadowFrame:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+    sCorner.CornerRadius = UDim.new(0, 6)
+    sCorner.Parent = shadowFrame
+    shadowFrame.Parent = rankingsModal
+
+    local cardFrame = rankingsModal:FindFirstChild("CardFrame") or Instance.new("Frame")
+    cardFrame.Name = "CardFrame"
+    cardFrame.Size = UDim2.new(1, -12, 1, -12)
+    cardFrame.Position = UDim2.new(0, 0, 0, 0)
+    cardFrame.BackgroundColor3 = Color3.fromRGB(240, 120, 20)
+    cardFrame.BorderSizePixel = 0
+    cardFrame.ZIndex = 22
+    local cCorner = cardFrame:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 6)
+    cCorner.Parent = cardFrame
+
+    local cStroke = cardFrame:FindFirstChild("CardStroke") or cardFrame:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
+    cStroke.Name = "CardStroke"
+    cStroke.Color = Color3.fromRGB(0, 0, 0)
+    cStroke.Thickness = 5
+    cStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    cStroke.LineJoinMode = Enum.LineJoinMode.Round
+    cStroke.Parent = cardFrame
+
+    local bgImage = cardFrame:FindFirstChild("BgImage") or Instance.new("ImageLabel")
+    bgImage.Name = "BgImage"
+    bgImage.Size = UDim2.new(1, 0, 1, 0)
+    bgImage.Position = UDim2.new(0, 0, 0, 0)
+    bgImage.BackgroundTransparency = 1
+    bgImage.Image = "rbxassetid://86968506519019"
+    bgImage.ScaleType = Enum.ScaleType.Crop
+    bgImage.ZIndex = 23
+    local bgCorner = bgImage:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0, 6)
+    bgCorner.Parent = bgImage
+    bgImage.Parent = cardFrame
+
+    cardFrame.Parent = rankingsModal
+
+    return shadowFrame, cardFrame
+end
+
 RankingsRevealed.OnClientEvent:Connect(function(data)
+    CurrentPhase = "Phase4_Reveal"
     if not IsActiveInRound() then
         rankingsModal.Visible = false
-        reopenRankBtn.Visible = false
+        updateActionButtonsVisibility()
         return
     end
     topBanner.Visible = false
@@ -962,89 +1089,91 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     for _, p in ipairs(data.BottomBidders or {}) do table.insert(allBidders, p) end
     
     local rowCount = #allBidders
-    local rowHeight = 36
-    local rowPadding = 4
+    local rowHeight = 38
+    local rowPadding = 5
     local tableContentHeight = rowCount * (rowHeight + rowPadding)
     
-    local desiredHeight = 96 + tableContentHeight + 16
-    local modalHeight = math.clamp(desiredHeight, 220, 390)
+    local desiredHeight = 118 + tableContentHeight + 16
+    local modalHeight = math.clamp(desiredHeight, 320, 580)
     
+    local shadowFrame, cardFrame = ensureRankingsStructure()
     rankingsModal.Size = UDim2.new(0, 580, 0, modalHeight)
-    rankingsModal.Position = UDim2.new(0.5, -290, 0.5, -modalHeight / 2)
-    rankingsModal.BackgroundColor3 = Color3.fromRGB(12, 13, 17)
-    rankingsModal.BackgroundTransparency = 0
+    rankingsModal.AnchorPoint = Vector2.new(0.5, 0.5)
+    rankingsModal.Position = UDim2.new(0.5, 0, 0.5, 0)
     
-    local mCorner = rankingsModal:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-    mCorner.CornerRadius = UDim.new(0, 6)
-    mCorner.Parent = rankingsModal
-    
-    local mStroke = rankingsModal:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
-    mStroke.Color = Color3.fromRGB(36, 40, 52)
-    mStroke.Thickness = 1
-    mStroke.Parent = rankingsModal
-    
-    -- Red X Close Button for RankingsModal
-    local closeRankBtn = rankingsModal:FindFirstChild("CloseRankBtn") or Instance.new("TextButton")
-    closeRankBtn.Name = "CloseRankBtn"
-    closeRankBtn.Size = UDim2.new(0, 26, 0, 26)
-    closeRankBtn.Position = UDim2.new(1, -34, 0, 8)
-    closeRankBtn.BackgroundColor3 = Color3.fromRGB(220, 45, 55)
-    closeRankBtn.Text = "✕"
-    closeRankBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeRankBtn.Font = Enum.Font.GothamBold
-    closeRankBtn.TextSize = 14
-    closeRankBtn.ZIndex = 30
-    local crbCorner = closeRankBtn:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-    crbCorner.CornerRadius = UDim.new(0, 13)
-    crbCorner.Parent = closeRankBtn
-    closeRankBtn.Parent = rankingsModal
-    
-    closeRankBtn.MouseButton1Click:Connect(function()
-        rankingsModal.Visible = false
-        if IsActiveInRound() then
-            reopenRankBtn.Visible = true
-            updateCenterDockLayout()
-        end
-    end)
-    
-    -- Clear previous dynamic contents
-    for _, child in ipairs(rankingsModal:GetChildren()) do
-        if child.Name == "HeaderFrame" or child.Name == "LeaderboardScroll" or child.Name == "TitleHeader" then
+    -- Clear previous dynamic contents inside cardFrame
+    for _, child in ipairs(cardFrame:GetChildren()) do
+        if child.Name == "HeaderFrame" or child.Name == "LeaderboardScroll" or child.Name == "TitleHeader" or child.Name == "CloseRankBtn" then
             child:Destroy()
-        elseif child:IsA("ScrollingFrame") or (child:IsA("TextLabel") and child.Name ~= "TitleHeader") then
-            child.Visible = false
+        end
+    end
+    -- Also clean any legacy children directly on rankingsModal
+    for _, child in ipairs(rankingsModal:GetChildren()) do
+        if child.Name == "HeaderFrame" or child.Name == "LeaderboardScroll" or child.Name == "TitleHeader" or child.Name == "CloseRankBtn" then
+            child:Destroy()
         end
     end
     
-    -- Integrated Title Header Container
+    -- Red X Close Button on CardFrame
+    local closeRankBtn = Instance.new("TextButton")
+    closeRankBtn.Name = "CloseRankBtn"
+    closeRankBtn.Size = UDim2.new(0, 32, 0, 30)
+    closeRankBtn.Position = UDim2.new(1, -12, 0, 12)
+    closeRankBtn.AnchorPoint = Vector2.new(1, 0)
+    closeRankBtn.BackgroundColor3 = Color3.fromRGB(245, 0, 0)
+    closeRankBtn.Text = "X"
+    closeRankBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeRankBtn.Font = Enum.Font.GothamBlack
+    closeRankBtn.TextSize = 18
+    closeRankBtn.ZIndex = 35
+    
+    local crbCorner = Instance.new("UICorner")
+    crbCorner.CornerRadius = UDim.new(0, 6)
+    crbCorner.Parent = closeRankBtn
+    
+    local crbStroke = Instance.new("UIStroke")
+    crbStroke.Color = Color3.fromRGB(0, 0, 0)
+    crbStroke.Thickness = 2.5
+    crbStroke.Parent = closeRankBtn
+    
+    closeRankBtn.MouseButton1Click:Connect(function()
+        rankingsModal.Visible = false
+        updateActionButtonsVisibility()
+    end)
+    closeRankBtn.Parent = cardFrame
+    
+    -- Integrated Title Header Container inside cardFrame
     local titleHeader = Instance.new("Frame")
     titleHeader.Name = "TitleHeader"
-    titleHeader.Size = UDim2.new(1, -60, 0, 50)
-    titleHeader.Position = UDim2.new(0, 12, 0, 10)
+    titleHeader.Size = UDim2.new(1, -64, 0, 56)
+    titleHeader.Position = UDim2.new(0, 16, 0, 12)
     titleHeader.BackgroundTransparency = 1
-    titleHeader.Parent = rankingsModal
+    titleHeader.ZIndex = 28
+    titleHeader.Parent = cardFrame
     
-    -- Phase Badge (Cyan Pill)
+    -- Phase Badge (Comic Dark Pill with Gold Text)
     local phaseBadge = Instance.new("Frame")
-    phaseBadge.Size = UDim2.new(0, 175, 0, 20)
+    phaseBadge.Size = UDim2.new(0, 185, 0, 20)
     phaseBadge.Position = UDim2.new(0, 0, 0, 0)
-    phaseBadge.BackgroundColor3 = Color3.fromRGB(18, 32, 42)
+    phaseBadge.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
+    phaseBadge.ZIndex = 29
     local pbCorner = Instance.new("UICorner")
     pbCorner.CornerRadius = UDim.new(0, 4)
     pbCorner.Parent = phaseBadge
     local pbStroke = Instance.new("UIStroke")
-    pbStroke.Color = Color3.fromRGB(0, 180, 220)
-    pbStroke.Thickness = 1
+    pbStroke.Color = Color3.fromRGB(0, 0, 0)
+    pbStroke.Thickness = 2
     pbStroke.Parent = phaseBadge
     
     local pbText = Instance.new("TextLabel")
     pbText.Size = UDim2.new(1, 0, 1, 0)
     pbText.BackgroundTransparency = 1
-    pbText.Text = "PHASE 4 • BID RANKINGS"
+    pbText.Text = "🏆 PHASE 4 • BID RANKINGS"
     pbText.Font = Enum.Font.GothamBold
     pbText.TextSize = 10
-    pbText.TextColor3 = Color3.fromRGB(0, 210, 255)
+    pbText.TextColor3 = Color3.fromRGB(255, 215, 0)
     pbText.TextXAlignment = Enum.TextXAlignment.Center
+    pbText.ZIndex = 30
     pbText.Parent = phaseBadge
     phaseBadge.Parent = titleHeader
     
@@ -1055,33 +1184,44 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     titleLabel.BackgroundTransparency = 1
     titleLabel.Text = "SURVIVAL BID LEADERBOARD"
     titleLabel.Font = Enum.Font.GothamBlack
-    titleLabel.TextSize = 16
-    titleLabel.TextColor3 = Color3.fromRGB(240, 245, 255)
+    titleLabel.TextSize = 17
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    titleLabel.TextStrokeTransparency = 0
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.ZIndex = 29
     titleLabel.Parent = titleHeader
     
     -- Subtitle explaining rules
     local subLabel = Instance.new("TextLabel")
-    subLabel.Size = UDim2.new(1, 0, 0, 16)
+    subLabel.Size = UDim2.new(1, 0, 0, 14)
     subLabel.Position = UDim2.new(0, 0, 0, 46)
     subLabel.BackgroundTransparency = 1
-    subLabel.Text = "Top 50% glow neon green & survive • Earliest submission wins tie-breakers"
-    subLabel.Font = Enum.Font.GothamMedium
-    subLabel.TextSize = 11
-    subLabel.TextColor3 = Color3.fromRGB(150, 165, 185)
+    subLabel.Text = "Top 50% Survive • Lowest Bidders Face The Hammer"
+    subLabel.Font = Enum.Font.GothamBold
+    subLabel.TextSize = 10
+    subLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    subLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    subLabel.TextStrokeTransparency = 0.4
     subLabel.TextXAlignment = Enum.TextXAlignment.Left
+    subLabel.ZIndex = 29
     subLabel.Parent = titleHeader
     
     -- Table Header Frame: SI.NO | PLAYER NAME | BID | TIME
     local headerFrame = Instance.new("Frame")
     headerFrame.Name = "HeaderFrame"
-    headerFrame.Size = UDim2.new(1, -24, 0, 26)
-    headerFrame.Position = UDim2.new(0, 12, 0, 68)
-    headerFrame.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
+    headerFrame.Size = UDim2.new(1, -32, 0, 28)
+    headerFrame.Position = UDim2.new(0, 16, 0, 74)
+    headerFrame.BackgroundColor3 = Color3.fromRGB(15, 17, 22)
     headerFrame.BorderSizePixel = 0
+    headerFrame.ZIndex = 28
     local hCorner = Instance.new("UICorner")
-    hCorner.CornerRadius = UDim.new(0, 4)
+    hCorner.CornerRadius = UDim.new(0, 6)
     hCorner.Parent = headerFrame
+    local hStroke = Instance.new("UIStroke")
+    hStroke.Color = Color3.fromRGB(0, 0, 0)
+    hStroke.Thickness = 2
+    hStroke.Parent = headerFrame
     
     local function makeHeaderCell(text, size, pos, align)
         local hCell = Instance.new("TextLabel")
@@ -1091,29 +1231,32 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
         hCell.Text = text
         hCell.Font = Enum.Font.GothamBold
         hCell.TextSize = 11
-        hCell.TextColor3 = Color3.fromRGB(150, 160, 180)
+        hCell.TextColor3 = Color3.fromRGB(215, 225, 240)
         hCell.TextXAlignment = align
+        hCell.ZIndex = 29
         hCell.Parent = headerFrame
         return hCell
     end
     
-    makeHeaderCell("SI.NO", UDim2.new(0.10, 0, 1, 0), UDim2.new(0, 6, 0, 0), Enum.TextXAlignment.Center)
-    makeHeaderCell("PLAYER NAME", UDim2.new(0.50, -12, 1, 0), UDim2.new(0.10, 12, 0, 0), Enum.TextXAlignment.Left)
-    makeHeaderCell("BID", UDim2.new(0.20, -10, 1, 0), UDim2.new(0.60, 0, 0, 0), Enum.TextXAlignment.Right)
+    makeHeaderCell("SI.NO", UDim2.new(0.12, 0, 1, 0), UDim2.new(0, 4, 0, 0), Enum.TextXAlignment.Center)
+    makeHeaderCell("PLAYER NAME", UDim2.new(0.48, -12, 1, 0), UDim2.new(0.12, 8, 0, 0), Enum.TextXAlignment.Left)
+    makeHeaderCell("BID", UDim2.new(0.20, -8, 1, 0), UDim2.new(0.60, 0, 0, 0), Enum.TextXAlignment.Right)
     makeHeaderCell("TIME", UDim2.new(0.20, -12, 1, 0), UDim2.new(0.80, 0, 0, 0), Enum.TextXAlignment.Right)
-    headerFrame.Parent = rankingsModal
+    headerFrame.Parent = cardFrame
     
     -- Scrolling Container for Rows
     local scroll = Instance.new("ScrollingFrame")
     scroll.Name = "LeaderboardScroll"
-    scroll.Size = UDim2.new(1, -24, 1, -104)
-    scroll.Position = UDim2.new(0, 12, 0, 98)
+    scroll.Size = UDim2.new(1, -32, 1, -114)
+    scroll.Position = UDim2.new(0, 16, 0, 106)
     scroll.BackgroundTransparency = 1
     scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = (desiredHeight > 390) and 4 or 0
-    scroll.ScrollBarImageColor3 = Color3.fromRGB(60, 68, 85)
-    scroll.ScrollingEnabled = (desiredHeight > 390)
+    local isScrollable = (tableContentHeight > (modalHeight - 120))
+    scroll.ScrollBarThickness = isScrollable and 5 or 0
+    scroll.ScrollBarImageColor3 = Color3.fromRGB(0, 0, 0)
+    scroll.ScrollingEnabled = isScrollable
     scroll.CanvasSize = UDim2.new(0, 0, 0, tableContentHeight)
+    scroll.ZIndex = 28
     
     local uiList = Instance.new("UIListLayout")
     uiList.SortOrder = Enum.SortOrder.LayoutOrder
@@ -1124,54 +1267,58 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
         local isSafe = (i <= safeCount)
         local row = Instance.new("Frame")
         row.Name = "Row_" .. i
-        row.Size = UDim2.new(1, (desiredHeight > 390) and -8 or 0, 0, rowHeight)
+        row.Size = UDim2.new(1, isScrollable and -8 or 0, 0, rowHeight)
         row.LayoutOrder = i
         row.BorderSizePixel = 0
-        row.BackgroundColor3 = isSafe and Color3.fromRGB(16, 22, 26) or Color3.fromRGB(22, 16, 20)
+        row.BackgroundColor3 = isSafe and Color3.fromRGB(14, 32, 22) or Color3.fromRGB(36, 14, 18)
+        row.ZIndex = 28
         
         local rCorner = Instance.new("UICorner")
-        rCorner.CornerRadius = UDim.new(0, 4)
+        rCorner.CornerRadius = UDim.new(0, 6)
         rCorner.Parent = row
         
         local rStroke = Instance.new("UIStroke")
-        rStroke.Color = isSafe and Color3.fromRGB(30, 52, 40) or Color3.fromRGB(48, 28, 34)
-        rStroke.Thickness = 1
+        rStroke.Color = Color3.fromRGB(0, 0, 0)
+        rStroke.Thickness = 2
         rStroke.Parent = row
         
         -- Col 1: SI.NO Rank Pill (#1, #2...)
         local c1 = Instance.new("TextLabel")
-        c1.Size = UDim2.new(0.10, 0, 1, 0)
-        c1.Position = UDim2.new(0, 6, 0, 0)
+        c1.Size = UDim2.new(0.12, 0, 1, 0)
+        c1.Position = UDim2.new(0, 4, 0, 0)
         c1.BackgroundTransparency = 1
         c1.Text = "#" .. tostring(i)
         c1.Font = Enum.Font.GothamBold
         c1.TextSize = 13
-        c1.TextColor3 = (i == 1) and Color3.fromRGB(255, 215, 0) or (isSafe and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(255, 90, 100))
+        c1.TextColor3 = (i == 1) and Color3.fromRGB(255, 215, 0) or (isSafe and Color3.fromRGB(60, 225, 120) or Color3.fromRGB(255, 80, 90))
         c1.TextXAlignment = Enum.TextXAlignment.Center
+        c1.ZIndex = 29
         c1.Parent = row
         
         -- Col 2: Real Roblox Username / Display Name
         local c2 = Instance.new("TextLabel")
-        c2.Size = UDim2.new(0.50, -12, 1, 0)
-        c2.Position = UDim2.new(0.10, 12, 0, 0)
+        c2.Size = UDim2.new(0.48, -12, 1, 0)
+        c2.Position = UDim2.new(0.12, 8, 0, 0)
         c2.BackgroundTransparency = 1
         c2.Text = p.Name or "Unknown"
         c2.Font = Enum.Font.GothamBold
         c2.TextSize = 13
-        c2.TextColor3 = Color3.fromRGB(240, 245, 255)
+        c2.TextColor3 = Color3.fromRGB(255, 255, 255)
         c2.TextXAlignment = Enum.TextXAlignment.Left
+        c2.ZIndex = 29
         c2.Parent = row
         
         -- Col 3: BID (Right aligned, Gold $X.XX)
         local c3 = Instance.new("TextLabel")
-        c3.Size = UDim2.new(0.20, -10, 1, 0)
+        c3.Size = UDim2.new(0.20, -8, 1, 0)
         c3.Position = UDim2.new(0.60, 0, 0, 0)
         c3.BackgroundTransparency = 1
         c3.Text = string.format("$%.2f", p.CurrentBid or 0)
         c3.Font = Enum.Font.GothamBlack
         c3.TextSize = 13
-        c3.TextColor3 = Color3.fromRGB(255, 210, 60)
+        c3.TextColor3 = Color3.fromRGB(255, 215, 60)
         c3.TextXAlignment = Enum.TextXAlignment.Right
+        c3.ZIndex = 29
         c3.Parent = row
         
         -- Col 4: TIME (Right aligned, Slate/Cyan Y.YYs)
@@ -1183,16 +1330,17 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
         c4.Text = string.format("%.2fs", elapsed)
         c4.Font = Enum.Font.GothamMedium
         c4.TextSize = 13
-        c4.TextColor3 = Color3.fromRGB(160, 185, 215)
+        c4.TextColor3 = isSafe and Color3.fromRGB(160, 235, 190) or Color3.fromRGB(255, 160, 170)
         c4.TextXAlignment = Enum.TextXAlignment.Right
+        c4.ZIndex = 29
         c4.Parent = row
         
         row.Parent = scroll
     end
     
-    scroll.Parent = rankingsModal
+    scroll.Parent = cardFrame
     rankingsModal.Visible = true
-    reopenRankBtn.Visible = false
+    updateActionButtonsVisibility()
 end)
 
 --------------------------------------------------------------------------------
@@ -1268,10 +1416,8 @@ end)
 
 RoundOver.OnClientEvent:Connect(function()
     rankingsModal.Visible = false
-    reopenRankBtn.Visible = false
-    if not reopenBidBtn.Visible then
-        reopenContainer.Visible = false
-    end
+    biddingModal.Visible = false
+    updateActionButtonsVisibility()
 end)
 
 --------------------------------------------------------------------------------

@@ -68,9 +68,9 @@ local function setupPlayerEconomy(player: Player)
 	end
 
 	player:SetAttribute("OverallCash", savedCash)
-	player:SetAttribute("Wallet", 0)
-	player:SetAttribute("Money", 0)
-	player:SetAttribute("IsInGame", false) -- Starts in Lobby (Left-side Overall Cash visible)
+	player:SetAttribute("Wallet", STARTING_GAME_WALLET)
+	player:SetAttribute("Money", STARTING_GAME_WALLET)
+	player:SetAttribute("IsInGame", false)
 	syncLeaderstats(player)
 
 	player.AttributeChanged:Connect(function(attr)
@@ -178,10 +178,10 @@ function CashAndWalletManager.SettlePlayerGameCash(player: Player, reason: strin
 	local previousOverall = player:GetAttribute("OverallCash") or 0
 	local newOverall = previousOverall + earnedCash
 
-	-- Update Persistent Lobby Cash & Switch UI back to Lobby Mode (Left-Side Display)
+	-- Update Persistent Lifetime Cash & Reset Playable Session Wallet for Next Match
 	player:SetAttribute("OverallCash", newOverall)
-	player:SetAttribute("Wallet", 0)
-	player:SetAttribute("Money", 0)
+	player:SetAttribute("Wallet", STARTING_GAME_WALLET)
+	player:SetAttribute("Money", STARTING_GAME_WALLET)
 	player:SetAttribute("IsInGame", false)
 
 	-- Notify Client UI to show the "+$Earned (Survived Xs * 20)" animation on the Left Side

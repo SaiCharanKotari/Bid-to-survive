@@ -161,14 +161,14 @@ local function applySVG3ButtonStyle(button: TextButton, labelText: string, textS
 	end
 	corner.CornerRadius = UDim.new(0, 1)
 
-	-- Solid Pitch-Black outer border: UIStroke with Thickness = 5, ApplyStrokeMode = Border, LineJoinMode = Miter
+	-- Solid Pitch-Black outer border: UIStroke with Thickness = 4, ApplyStrokeMode = Border, LineJoinMode = Miter
 	local stroke = button:FindFirstChildOfClass("UIStroke")
 	if not stroke then
 		stroke = Instance.new("UIStroke")
 		stroke.Parent = button
 	end
 	stroke.Color = Color3.fromRGB(0, 0, 0)
-	stroke.Thickness = 5
+	stroke.Thickness = 4
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.LineJoinMode = Enum.LineJoinMode.Miter
 
@@ -200,7 +200,7 @@ local function applySVG3ButtonStyle(button: TextButton, labelText: string, textS
 	end
 	label.Text = labelText
 	label.Font = Enum.Font.GothamMedium
-	label.TextSize = textSize or 28
+	label.TextSize = textSize or 24
 	label.TextColor3 = Color3.fromRGB(255, 255, 255)
 	label.TextXAlignment = Enum.TextXAlignment.Center
 	label.TextYAlignment = Enum.TextYAlignment.Center
@@ -218,8 +218,8 @@ local function upgradeBidAndLeaderboardButtons()
 	if centerDock then
 		centerDock.Name = "CenterActionDock"
 		centerDock.AnchorPoint = Vector2.new(0.5, 0.5)
-		centerDock.Position = UDim2.new(0.5, 0, 0.42, 0)
-		centerDock.Size = UDim2.new(0, 460, 0, 62)
+		centerDock.Position = UDim2.new(0.5, 0, 0.25, 0) -- Middle of upper half (Y = 0.25)
+		centerDock.Size = UDim2.new(0, 184, 0, 50)
 		centerDock.BackgroundTransparency = 1
 
 		local bidButton = centerDock:FindFirstChild("ReopenBidBtn") :: TextButton?
@@ -228,17 +228,17 @@ local function upgradeBidAndLeaderboardButtons()
 			or centerDock:FindFirstChild("LeaderboardButton") :: TextButton?
 
 		if bidButton then
-			applySVG3ButtonStyle(bidButton, "BID", 28)
+			applySVG3ButtonStyle(bidButton, "BID", 24)
 			bidButton.AnchorPoint = Vector2.new(0.5, 0.5)
-			bidButton.Size = UDim2.new(0, 210, 0, 62)
-			bidButton.Position = UDim2.new(0.5, -118, 0.5, 0)
+			bidButton.Size = UDim2.new(0, 184, 0, 50)
+			bidButton.Position = UDim2.new(0.5, 0, 0.5, 0)
 		end
 
 		if leaderboardButton then
-			applySVG3ButtonStyle(leaderboardButton, "LEADERBOARD", 20)
+			applySVG3ButtonStyle(leaderboardButton, "LEADERBOARD", 18)
 			leaderboardButton.AnchorPoint = Vector2.new(0.5, 0.5)
-			leaderboardButton.Size = UDim2.new(0, 210, 0, 62)
-			leaderboardButton.Position = UDim2.new(0.5, 118, 0.5, 0)
+			leaderboardButton.Size = UDim2.new(0, 184, 0, 50)
+			leaderboardButton.Position = UDim2.new(0.5, 0, 0.5, 0)
 		end
 	end
 
@@ -248,15 +248,15 @@ local function upgradeBidAndLeaderboardButtons()
 	local btnContainer = card and card:FindFirstChild("BidBtnContainer")
 	local submitBtn = btnContainer and btnContainer:FindFirstChild("SubmitBtn") :: TextButton?
 	if submitBtn then
-		applySVG3ButtonStyle(submitBtn, "BID", 28)
+		applySVG3ButtonStyle(submitBtn, "BID", 24)
 		btnContainer.AnchorPoint = Vector2.new(0.5, 0.5)
 		btnContainer.Position = UDim2.new(0.5, 0, 0.68, 0)
-		btnContainer.Size = UDim2.new(0, 210, 0, 56)
+		btnContainer.Size = UDim2.new(0, 184, 0, 48)
 
 		local shadow = btnContainer:FindFirstChild("BtnShadow")
 		if shadow then
 			shadow.AnchorPoint = Vector2.new(0.5, 0.5)
-			shadow.Position = UDim2.new(0.5, 4, 0.5, 4)
+			shadow.Position = UDim2.new(0.5, 3, 0.5, 3)
 			shadow.Size = UDim2.new(1, 0, 1, 0)
 			shadow.ZIndex = 25
 		end

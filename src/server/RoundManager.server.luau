@@ -279,15 +279,26 @@ end
 
 local function SetupCompanionBots(targetTotal)
     CleanupBots()
-    local realActiveCount = #GetLivingRealPlayers()
-    local botsNeeded = math.max(0, targetTotal - realActiveCount)
-    local botNames = {"ApeSlayer", "ShadowRunner", "LuckyBids", "AlphaTitan", "RiskHunter"}
+    local realEligibleCount = #GetReadyEligiblePlayers()
+    if realEligibleCount == 0 then
+        realEligibleCount = #GetLivingRealPlayers()
+    end
+    if realEligibleCount == 0 then
+        realEligibleCount = #Players:GetPlayers()
+    end
+    local botsNeeded = math.max(0, targetTotal - realEligibleCount)
+    local botNames = {
+        "ApeSlayer", "ShadowRunner", "LuckyBids", "AlphaTitan", "RiskHunter",
+        "ViperStrike", "CyberGhost", "BlazeWarrior", "EchoPhantom", "IronClaw"
+    }
     local wPos = Walkway.Position
     
     for i = 1, botsNeeded do
         local bName = botNames[i] or ("Bot_" .. i)
         local bId = -200 - i
-        local spawnPos = Vector3.new(wPos.X + (i * 20 - 40), wPos.Y + 3.5, wPos.Z + math.random(-20, 20))
+        local angle = (i / math.max(1, botsNeeded)) * math.pi * 2
+        local radius = 22 + (i % 3) * 14
+        local spawnPos = Vector3.new(wPos.X + math.cos(angle) * radius, wPos.Y + 3.5, wPos.Z + math.sin(angle) * radius)
         CreateBotDummy(bName, bId, spawnPos)
     end
 end
@@ -394,7 +405,7 @@ local function InitMatch()
         player:SetAttribute("HP", GameConfig.MaxHealth)
     end
     
-    SetupCompanionBots(4)
+    SetupCompanionBots(10)
     CashAndWalletManager.StartGameForPlayers(GetReadyEligiblePlayers())
     SyncAllStats()
     ClearWinnerGlow()
@@ -470,11 +481,13 @@ local function RunMatch(session)
             TeleportToArena(p)
         end
         
-        -- Reset bots to arena
+        -- Reset bots to arena in natural circular scatter
         local wPos = Walkway.Position
         for i, b in ipairs(ActiveBots) do
             if b.IsAlive and b.Character then
-                b.Character:PivotTo(CFrame.new(wPos.X + (i * 20 - 30), wPos.Y + 3.5, wPos.Z + math.random(-25, 25)))
+                local angle = (i / math.max(1, #ActiveBots)) * math.pi * 2
+                local radius = 22 + (i % 3) * 14
+                b.Character:PivotTo(CFrame.new(wPos.X + math.cos(angle) * radius, wPos.Y + 3.5, wPos.Z + math.sin(angle) * radius))
             end
         end
         
@@ -822,8 +835,8 @@ local function InitPlayer(player)
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
-            Money = 0,
-            Wallet = 0,
+            Money = CashAndWalletManager.STARTING_GAME_WALLET or 20,
+            Wallet = CashAndWalletManager.STARTING_GAME_WALLET or 20,
             Health = GameConfig.MaxHealth,
             IsAlive = true,
             IsAFK = false, -- Default OFF as requested

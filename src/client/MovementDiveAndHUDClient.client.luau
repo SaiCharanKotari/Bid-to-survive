@@ -17,6 +17,21 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ContentProvider = game:GetService("ContentProvider")
 local Debris = game:GetService("Debris")
 
+local StarterGui = game:GetService("StarterGui")
+
+-- Guarantee default Roblox top-right Health Bar is eliminated
+task.spawn(function()
+	local maxRetries = 20
+	while maxRetries > 0 do
+		local ok = pcall(function()
+			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+		end)
+		if ok then break end
+		task.wait(0.2)
+		maxRetries -= 1
+	end
+end)
+
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
 
@@ -65,9 +80,16 @@ local JETPACK_BURST_SPEED       = 85.0 -- High-speed acceleration feeling (4x sp
 local JETPACK_COOLDOWN          = 1.25
 local JETPACK_ENERGY_COST       = 20
 
--- Author-provided Jetpack Sound (assets/jetpack-sound.mp3)
-local JETPACK_BURST_SOUND_ID    = "rbxasset://sounds/jetpack-sound.mp3"
-local JETPACK_BURST_VOLUME      = 0.85
+-- ============================================================================
+-- JETPACK BURST SOUND & TIMING TUNING (Tweak these constants anytime!)
+-- ============================================================================
+local JETPACK_BURST_SOUND_ID       = "rbxasset://sounds/jetpack-sound.mp3"
+local JETPACK_BURST_VOLUME         = 0.90
+local JETPACK_PLAYBACK_SPEED       = 1.35 -- Playback speed multiplier (1.35X)
+local JETPACK_SOUND_START_OFFSET   = 0.10 -- [CUT FRONT]: Skips first 0.10s of audio (removes slow wind-up/silence)
+local JETPACK_SOUND_CUT_LAST       = 0.70 -- [CUT BACK]: Cuts trailing audio at end of sound (0.50s)
+local JETPACK_SOUND_FADE_DURATION  = 0.80 -- [FADE DURATION]: Audio time (in seconds) used to smoothly fade out volume from full to 0
+local JETPACK_PRE_LAUNCH_DELAY     = 0.02 -- [LAUNCH DELAY]: Delay before movement launches (0.02s = instant launch!)
 
 -- Energy Settings (White / Cyan EP Bar)
 local MAX_ENERGY        = 100
@@ -91,342 +113,21 @@ local runTrack: AnimationTrack?  = nil
 local healthConn: RBXScriptConnection? = nil
 
 -- ============================================================================
--- 2. UNIFIED HP, ENERGY & DYNAMIC LOBBY/GAME CURRENCY HUD BUILDER
+-- 2. UNIFIED HP, ENERGY & DYNAMIC LOBBY/GAME CURRENCY HUD (STATUS HUD VIEW)
 -- ============================================================================
-local PayoutRemote: RemoteEvent? = (ReplicatedStorage:FindFirstChild("CashPayoutEvent") :: any)
-
-local function createOrUpdateStatusHUD()
-	local playerGui = player:WaitForChild("PlayerGui")
-	local existing = playerGui:FindFirstChild("BidToSurviveStatusHUD")
-	if existing then existing:Destroy() end
-
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "BidToSurviveStatusHUD"
-	screenGui.ResetOnSpawn = false
-	screenGui.IgnoreGuiInset = true
-	screenGui.Parent = playerGui
-
-	-- COMIC POP-ART STATUS STACK: Lifetime Cash, HP (Red), and EP (Cyan) - Sleek & Compact
-	local statusStack = Instance.new("Frame")
-	statusStack.Name = "BottomLeftStatusStack"
-	statusStack.AnchorPoint = Vector2.new(0, 1)
-	statusStack.Position = UDim2.new(0, 24, 1, -24)
-	statusStack.Size = UDim2.new(0, 240, 0, 106)
-	statusStack.BackgroundTransparency = 1
-	statusStack.Parent = screenGui
-
-	local listLayout = Instance.new("UIListLayout")
-	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	listLayout.Padding = UDim.new(0, 5)
-	listLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-	listLayout.Parent = statusStack
-
-	local function createComicBar(order: number, name: string, tagText: string, fillColor: Color3, underlayColor: Color3)
-		local bg = Instance.new("Frame")
-		bg.Name = name .. "Frame"
-		bg.LayoutOrder = order
-		bg.Size = UDim2.new(1, 0, 0, 34)
-		bg.BackgroundColor3 = underlayColor
-		bg.BorderSizePixel = 0
-		bg.Parent = statusStack
-
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 4)
-		corner.Parent = bg
-
-		local stroke = Instance.new("UIStroke")
-		stroke.Color = Color3.fromRGB(0, 0, 0)
-		stroke.Thickness = 2
-		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		stroke.Parent = bg
-
-		local fill = Instance.new("Frame")
-		fill.Name = "Fill"
-		fill.Size = UDim2.new(1, 0, 1, 0)
-		fill.BackgroundColor3 = fillColor
-		fill.BorderSizePixel = 0
-		fill.Parent = bg
-
-		local fillCorner = Instance.new("UICorner")
-		fillCorner.CornerRadius = UDim.new(0, 4)
-		fillCorner.Parent = fill
-
-		-- Left Label (e.g. "HP" or "EP")
-		local tagLabel = Instance.new("TextLabel")
-		tagLabel.Name = "TagLabel"
-		tagLabel.Size = UDim2.new(0, 36, 1, 0)
-		tagLabel.Position = UDim2.new(0, 10, 0.5, 0)
-		tagLabel.AnchorPoint = Vector2.new(0, 0.5)
-		tagLabel.BackgroundTransparency = 1
-		tagLabel.Font = Enum.Font.GothamBlack
-		tagLabel.TextSize = 14
-		tagLabel.TextXAlignment = Enum.TextXAlignment.Left
-		tagLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-		tagLabel.Text = tagText
-		tagLabel.ZIndex = 3
-		tagLabel.Parent = bg
-
-		local tagStroke = Instance.new("UIStroke")
-		tagStroke.Thickness = 2
-		tagStroke.Color = Color3.fromRGB(0, 0, 0)
-		tagStroke.Parent = tagLabel
-
-		-- Right Numeric Value Label (e.g. "100")
-		local valLabel = Instance.new("TextLabel")
-		valLabel.Name = "ValueLabel"
-		valLabel.Size = UDim2.new(0, 56, 1, 0)
-		valLabel.Position = UDim2.new(1, -10, 0.5, 0)
-		valLabel.AnchorPoint = Vector2.new(1, 0.5)
-		valLabel.BackgroundTransparency = 1
-		valLabel.Font = Enum.Font.GothamBlack
-		valLabel.TextSize = 14
-		valLabel.TextXAlignment = Enum.TextXAlignment.Right
-		valLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-		valLabel.Text = "100"
-		valLabel.ZIndex = 3
-		valLabel.Parent = bg
-
-		local valStroke = Instance.new("UIStroke")
-		valStroke.Thickness = 2
-		valStroke.Color = Color3.fromRGB(0, 0, 0)
-		valStroke.Parent = valLabel
-
-		return bg, fill, valLabel
-	end
-
-	-- Red HP Bar (#FF0000 with 2px black stroke, white HP & number)
-	local hpBg, hpFill, hpLabel = createComicBar(2, "HP", "HP", Color3.fromRGB(255, 0, 0), Color3.fromRGB(60, 10, 15))
-	-- Cyan EP Bar (#00FFF2 with 2px black stroke, white EP & number)
-	local _, energyFill, energyLabel = createComicBar(3, "Energy", "EP", Color3.fromRGB(0, 255, 242), Color3.fromRGB(10, 45, 50))
-
-	-- Comic Green Lifetime Cash Frame (+0 $) with "CASH" badge
-	local moneyFrame = Instance.new("Frame")
-	moneyFrame.Name = "LifetimeCashFrame"
-	moneyFrame.LayoutOrder = 1
-	moneyFrame.Size = UDim2.new(1, 0, 0, 24)
-	moneyFrame.BackgroundTransparency = 1
-	moneyFrame.Parent = statusStack
-
-	local cashBadge = Instance.new("Frame")
-	cashBadge.Name = "CashBadge"
-	cashBadge.Size = UDim2.new(0, 44, 0, 18)
-	cashBadge.Position = UDim2.new(0, 0, 0.5, 0)
-	cashBadge.AnchorPoint = Vector2.new(0, 0.5)
-	cashBadge.BackgroundColor3 = Color3.fromRGB(0, 204, 0)
-	cashBadge.BorderSizePixel = 0
-	cashBadge.Parent = moneyFrame
-
-	local badgeCorner = Instance.new("UICorner")
-	badgeCorner.CornerRadius = UDim.new(0, 4)
-	badgeCorner.Parent = cashBadge
-
-	local badgeStroke = Instance.new("UIStroke")
-	badgeStroke.Thickness = 2
-	badgeStroke.Color = Color3.fromRGB(0, 0, 0)
-	badgeStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	badgeStroke.Parent = cashBadge
-
-	local badgeLabel = Instance.new("TextLabel")
-	badgeLabel.Name = "BadgeText"
-	badgeLabel.Size = UDim2.new(1, 0, 1, 0)
-	badgeLabel.BackgroundTransparency = 1
-	badgeLabel.Font = Enum.Font.GothamBlack
-	badgeLabel.TextSize = 10
-	badgeLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
-	badgeLabel.Text = "CASH"
-	badgeLabel.Parent = cashBadge
-
-	local lifetimeCashLabel = Instance.new("TextLabel")
-	lifetimeCashLabel.Name = "LifetimeCashLabel"
-	lifetimeCashLabel.Size = UDim2.new(1, -52, 1, 0)
-	lifetimeCashLabel.Position = UDim2.new(0, 52, 0.5, 0)
-	lifetimeCashLabel.AnchorPoint = Vector2.new(0, 0.5)
-	lifetimeCashLabel.BackgroundTransparency = 1
-	lifetimeCashLabel.Font = Enum.Font.GothamBlack
-	lifetimeCashLabel.TextSize = 18
-	lifetimeCashLabel.TextXAlignment = Enum.TextXAlignment.Left
-	lifetimeCashLabel.TextColor3 = Color3.fromRGB(0, 230, 0)
-	lifetimeCashLabel.Text = "+0 $"
-	lifetimeCashLabel.ZIndex = 3
-	lifetimeCashLabel.Parent = moneyFrame
-
-	local moneyStroke = Instance.new("UIStroke")
-	moneyStroke.Thickness = 2
-	moneyStroke.Color = Color3.fromRGB(0, 0, 0)
-	moneyStroke.Parent = lifetimeCashLabel
-
-	local lifetimeCashScale = Instance.new("UIScale")
-	lifetimeCashScale.Scale = 1.0
-	lifetimeCashScale.Parent = lifetimeCashLabel
-
-	-- Floating Payout Toast
-	local payoutToast = Instance.new("TextLabel")
-	payoutToast.Name = "PayoutToast"
-	payoutToast.Size = UDim2.new(1, 40, 0, 24)
-	payoutToast.Position = UDim2.new(0, 0, 0, -26)
-	payoutToast.BackgroundTransparency = 1
-	payoutToast.Font = Enum.Font.GothamBlack
-	payoutToast.TextSize = 15
-	payoutToast.TextXAlignment = Enum.TextXAlignment.Left
-	payoutToast.TextColor3 = Color3.fromRGB(52, 211, 153)
-	payoutToast.TextStrokeTransparency = 0.2
-	payoutToast.TextTransparency = 1
-	payoutToast.Text = ""
-	payoutToast.Parent = moneyFrame
-
-	-- BOTTOM-RIGHT WALLET CARD
-	local walletCard = Instance.new("Frame")
-	walletCard.Name = "BottomRightWalletCard"
-	walletCard.AnchorPoint = Vector2.new(1, 1)
-	walletCard.Position = UDim2.new(1, -24, 1, -24)
-	walletCard.Size = UDim2.new(0, 185, 0, 44)
-	walletCard.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
-	walletCard.BorderSizePixel = 0
-	walletCard.Parent = screenGui
-
-	local walletCorner = Instance.new("UICorner")
-	walletCorner.CornerRadius = UDim.new(0, 4)
-	walletCorner.Parent = walletCard
-
-	local walletStroke = Instance.new("UIStroke")
-	walletStroke.Thickness = 3
-	walletStroke.Color = Color3.fromRGB(0, 0, 0)
-	walletStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	walletStroke.Parent = walletCard
-
-	-- "WALLET" Badge on left of card
-	local walletBadge = Instance.new("Frame")
-	walletBadge.Name = "WalletBadge"
-	walletBadge.Size = UDim2.new(0, 68, 0, 26)
-	walletBadge.Position = UDim2.new(0, 9, 0.5, 0)
-	walletBadge.AnchorPoint = Vector2.new(0, 0.5)
-	walletBadge.BackgroundColor3 = Color3.fromRGB(255, 185, 0)
-	walletBadge.BorderSizePixel = 0
-	walletBadge.Parent = walletCard
-
-	local wbCorner = Instance.new("UICorner")
-	wbCorner.CornerRadius = UDim.new(0, 4)
-	wbCorner.Parent = walletBadge
-
-	local wbStroke = Instance.new("UIStroke")
-	wbStroke.Thickness = 2
-	wbStroke.Color = Color3.fromRGB(0, 0, 0)
-	wbStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	wbStroke.Parent = walletBadge
-
-	local wbText = Instance.new("TextLabel")
-	wbText.Name = "BadgeText"
-	wbText.Size = UDim2.new(1, 0, 1, 0)
-	wbText.BackgroundTransparency = 1
-	wbText.Font = Enum.Font.GothamBlack
-	wbText.TextSize = 13
-	wbText.TextColor3 = Color3.fromRGB(0, 0, 0)
-	wbText.Text = "WALLET"
-	wbText.Parent = walletBadge
-
-	-- Numeric Wallet Value (e.g. "$20.00")
-	local walletValLabel = Instance.new("TextLabel")
-	walletValLabel.Name = "WalletValueLabel"
-	walletValLabel.Size = UDim2.new(1, -88, 1, 0)
-	walletValLabel.Position = UDim2.new(1, -12, 0.5, 0)
-	walletValLabel.AnchorPoint = Vector2.new(1, 0.5)
-	walletValLabel.BackgroundTransparency = 1
-	walletValLabel.Font = Enum.Font.GothamBlack
-	walletValLabel.TextSize = 19
-	walletValLabel.TextXAlignment = Enum.TextXAlignment.Right
-	walletValLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	walletValLabel.Text = "$20.00"
-	walletValLabel.ZIndex = 3
-	walletValLabel.Parent = walletCard
-
-	local walletValStroke = Instance.new("UIStroke")
-	walletValStroke.Thickness = 2.5
-	walletValStroke.Color = Color3.fromRGB(0, 0, 0)
-	walletValStroke.Parent = walletValLabel
-
-	local walletScale = Instance.new("UIScale")
-	walletScale.Scale = 1.0
-	walletScale.Parent = walletCard
-
-	return hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lifetimeCashLabel, payoutToast, walletCard, walletValLabel, walletScale
-end
-
-local hpBg, hpFill, hpLabel, energyFill, energyLabel, statusStack, lifetimeCashLabel, payoutToast, walletCard, walletValLabel, walletScale =
-	createOrUpdateStatusHUD()
+local ClientUI = ReplicatedStorage:WaitForChild("ClientUI")
+local StatusHUDView = require(ClientUI:WaitForChild("components"):WaitForChild("StatusHUDView")) :: any
+local statusHUD = StatusHUDView.new(player)
 
 local function updateHPDisplay(health: number, maxHealth: number)
-	local safeMax = (maxHealth > 0) and maxHealth or 100
-	local ratio = math.clamp(health / safeMax, 0, 1)
-	hpLabel.Text = string.format("%d", math.ceil(health))
-	TweenService:Create(hpFill, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = UDim2.new(ratio, 0, 1, 0)
-	}):Play()
-end
-
-local displayedOverallCash = 0
-local countUpThread: thread? = nil
-local lastWalletVal = 20
-
-local function animateWalletScalePunch()
-	walletScale.Scale = 1.10
-	TweenService:Create(walletScale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Scale = 1.0
-	}):Play()
-end
-
-local function rollOverallCash(targetCash: number)
-	if countUpThread then
-		task.cancel(countUpThread)
-		countUpThread = nil
-	end
-
-	local startVal = displayedOverallCash
-	local diff = targetCash - startVal
-	if math.abs(diff) <= 0.01 then
-		displayedOverallCash = targetCash
-		lifetimeCashLabel.Text = string.format("+%d $", math.floor(targetCash))
-		return
-	end
-
-	countUpThread = task.spawn(function()
-		local duration = 1.0
-		local startTime = os.clock()
-		while true do
-			local elapsed = os.clock() - startTime
-			local progress = math.clamp(elapsed / duration, 0, 1)
-			local alpha = TweenService:GetValue(progress, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-			local cur = math.floor(startVal + (diff * alpha))
-			displayedOverallCash = cur
-			lifetimeCashLabel.Text = string.format("+%d $", cur)
-			if progress >= 1 then break end
-			task.wait(0.03)
-		end
-		displayedOverallCash = targetCash
-		lifetimeCashLabel.Text = string.format("+%d $", math.floor(targetCash))
-		countUpThread = nil
-	end)
+	statusHUD:UpdateHealth(health, maxHealth)
 end
 
 local function updateCurrencyUI()
 	local isInGame = (player:GetAttribute("IsInGame") == true)
 	local overallCash = player:GetAttribute("OverallCash") or 0
 	local matchWallet = player:GetAttribute("Wallet") or 20
-
-	hpBg.Visible = isInGame
-	statusStack.Size = isInGame and UDim2.new(0, 315, 0, 134) or UDim2.new(0, 315, 0, 82)
-
-	if countUpThread == nil then
-		displayedOverallCash = overallCash
-		lifetimeCashLabel.Text = string.format("+%d $", math.floor(overallCash))
-	end
-
-	if matchWallet ~= lastWalletVal then
-		if matchWallet < lastWalletVal then
-			animateWalletScalePunch()
-		end
-		lastWalletVal = matchWallet
-	end
-	walletValLabel.Text = string.format("$%.2f", matchWallet)
+	statusHUD:UpdateCurrencyUI(isInGame, overallCash, matchWallet)
 end
 
 local function updateMoneyDisplay()
@@ -448,23 +149,10 @@ end)
 
 local function handlePayout(earnedCash: number, secondsSurvived: number, newOverall: number)
 	updateCurrencyUI()
-	rollOverallCash(newOverall)
-
-	payoutToast.Text = string.format("+$%d (%ds Survived × $20)", earnedCash, secondsSurvived)
-	payoutToast.Position = UDim2.new(0, 0, 0, -18)
-	payoutToast.TextTransparency = 0
-
-	TweenService:Create(payoutToast, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Position = UDim2.new(0, 0, 0, -32)
-	}):Play()
-
-	task.delay(4.0, function()
-		TweenService:Create(payoutToast, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-			TextTransparency = 1
-		}):Play()
-	end)
+	statusHUD:HandlePayout(earnedCash, secondsSurvived, newOverall)
 end
 
+local PayoutRemote: RemoteEvent? = (ReplicatedStorage:FindFirstChild("CashPayoutEvent") :: any)
 if PayoutRemote then
 	PayoutRemote.OnClientEvent:Connect(handlePayout)
 else
@@ -491,11 +179,30 @@ end
 -- ============================================================================
 -- 3. CUSTOM WALK & RUN ANIMATION CONTROLLER
 -- ============================================================================
+local function isShiftPressed(): boolean
+	local keyHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+		or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+	-- If neither Shift key is physically held on keyboard, auto-clear isHoldingShift
+	if not keyHeld and isHoldingShift then
+		isHoldingShift = false
+	end
+	return isHoldingShift or keyHeld
+end
+
 local function syncMovementTracks()
 	if not activeHum or activeHum.Health <= 0 or isBursting then return end
 
+	-- Check if character is airborne (jumping or in freefall with feet in air)
+	local humState = activeHum:GetState()
+	local isAirborne = (activeHum.FloorMaterial == Enum.Material.Air) and (
+		(humState == Enum.HumanoidStateType.Jumping)
+		or (humState == Enum.HumanoidStateType.Freefall)
+		or (humState == Enum.HumanoidStateType.FallingDown)
+	)
+
 	local isMoving = activeHum.MoveDirection.Magnitude > 0.05
-	local wantSprint = isHoldingShift and isMoving and (not exhaustedLockout) and (currentEnergy > 0)
+	local hasShift = isShiftPressed()
+	local wantSprint = hasShift and isMoving and (not exhaustedLockout) and (currentEnergy > 0)
 
 	isSprinting = wantSprint
 	activeHum.WalkSpeed = wantSprint and SPRINT_WALK_SPEED or BASE_WALK_SPEED
@@ -506,51 +213,118 @@ local function syncMovementTracks()
 		}):Play()
 	end
 
+	-- When airborne, smoothly fade out walk & sprint tracks so native jump/fall animations play cleanly!
+	if isAirborne then
+		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.15) end
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.15) end
+		lastMovementState = "Airborne"
+		return
+	end
+
 	local newState = "Idle"
 	if isMoving then
 		newState = wantSprint and "Sprinting" or "Walking"
 	end
 
-	if newState ~= lastMovementState then
-		if newState == "Idle" then
-			print(string.format("[Movement][State] 🛑 IDLE (WalkSpeed: %.1f, MoveMag: %.2f) -> Stopped movement tracks", activeHum.WalkSpeed, activeHum.MoveDirection.Magnitude))
-		elseif newState == "Walking" then
-			print(string.format("[Movement][State] 🚶 WALKING (WalkSpeed: %.1f, MoveMag: %.2f) -> Playing WalkTrack (ID: %s, Priority: %s)", activeHum.WalkSpeed, activeHum.MoveDirection.Magnitude, currentWalkAnimId, walkTrack and walkTrack.Priority.Name or "nil"))
-		elseif newState == "Sprinting" then
-			print(string.format("[Movement][State] ⚡ SPRINTING (WalkSpeed: %.1f, Energy: %d%%) -> Playing RunTrack (ID: %s, Priority: %s)", activeHum.WalkSpeed, math.floor(currentEnergy), currentRunAnimId, runTrack and runTrack.Priority.Name or "nil"))
+	if newState == "Idle" then
+		-- Smoothly fade out movement tracks; Action priority fading allows default Core Idle to seamlessly show
+		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.2) end
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.2) end
+	elseif newState == "Sprinting" then
+		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.15) end
+		if runTrack then
+			if not runTrack.IsPlaying then
+				runTrack:Play(0.15, 1, 1.0)
+			end
+			local speedRatio = activeHum.WalkSpeed / SPRINT_WALK_SPEED
+			runTrack:AdjustSpeed(math.clamp(speedRatio, 0.8, 1.3))
 		end
-		lastMovementState = newState
+	elseif newState == "Walking" then
+		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.15) end
+		if walkTrack then
+			if not walkTrack.IsPlaying then
+				walkTrack:Play(0.15, 1, 1.0)
+			end
+			local speedRatio = activeHum.WalkSpeed / BASE_WALK_SPEED
+			walkTrack:AdjustSpeed(math.clamp(speedRatio, 0.8, 1.3))
+		end
 	end
 
-	if not isMoving then
-		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.15) end
-		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.15) end
-	elseif wantSprint then
-		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.12) end
-		if runTrack and not runTrack.IsPlaying then runTrack:Play(0.12, 1, 1.0) end
-		if activeHum then
-			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= runTrack and tr ~= walkTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
-					tr:Stop(0.1)
-				end
-			end
-		end
-	else
-		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.12) end
-		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play(0.12, 1, 1.0) end
-		if activeHum then
-			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= walkTrack and tr ~= runTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
-					tr:Stop(0.1)
-				end
-			end
-		end
+	if newState ~= lastMovementState then
+		lastMovementState = newState
 	end
 end
 
 -- ============================================================================
--- 4. POLISHED PURE-WHITE JETPACK BACKSIDE SPEED TRAILS & VISUAL EFFECTS
+-- 4. POLISHED PURE-WHITE JETPACK BACKSIDE SPEED TRAILS, SOUNDS & VISUAL EFFECTS
 -- ============================================================================
+local function playJetpackBurstSound(character: Model?, isLocal: boolean): Sound?
+	if not character then return nil end
+	local jetpack = character:FindFirstChild("Jetpack")
+	local handle = jetpack and jetpack:FindFirstChild("Handle") :: BasePart?
+	local parentPart = handle or character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character.PrimaryPart or character
+
+	local sound = Instance.new("Sound")
+	sound.Name = "JetpackBurstSound"
+	sound.SoundId = JETPACK_BURST_SOUND_ID
+	sound.Volume = isLocal and JETPACK_BURST_VOLUME or (JETPACK_BURST_VOLUME * 0.70)
+	sound.PlaybackSpeed = JETPACK_PLAYBACK_SPEED
+	sound.RollOffMode = Enum.RollOffMode.InverseTapered
+	sound.RollOffMinDistance = isLocal and 15 or 10
+	sound.RollOffMaxDistance = isLocal and 160 or 120
+	sound.Parent = parentPart
+
+	-- Exact timing configuration using top-level constants
+	pcall(function()
+		local timeLength = (sound.TimeLength > 0) and sound.TimeLength or 2.736
+		sound.PlaybackRegionsEnabled = true
+		sound.PlaybackRegion = NumberRange.new(
+			JETPACK_SOUND_START_OFFSET,
+			math.max(JETPACK_SOUND_START_OFFSET + 0.05, timeLength - JETPACK_SOUND_CUT_LAST)
+		)
+	end)
+
+	pcall(function()
+		sound:Play()
+		sound.TimePosition = JETPACK_SOUND_START_OFFSET
+	end)
+
+	-- Accurate cleanup: play at full volume until the final 1.0s of audio, then smoothly fade volume to 0
+	task.spawn(function()
+		local t0 = os.clock()
+		while sound and sound.Parent and sound.TimeLength <= 0 and (os.clock() - t0) < 0.5 do
+			task.wait(0.02)
+		end
+		local totalLength = (sound and sound.TimeLength > 0) and sound.TimeLength or 2.736
+		local activeAudio = math.max(0.1, totalLength - JETPACK_SOUND_START_OFFSET - JETPACK_SOUND_CUT_LAST)
+		local realPlayDuration = activeAudio / sound.PlaybackSpeed
+
+		-- User-configured fade duration controlled by top-level JETPACK_SOUND_FADE_DURATION
+		local fadeAudioDuration = math.clamp(JETPACK_SOUND_FADE_DURATION, 0.05, activeAudio)
+		local fadeRealDuration = math.min(realPlayDuration, fadeAudioDuration / sound.PlaybackSpeed)
+		local fullVolumeDuration = math.max(0, realPlayDuration - fadeRealDuration)
+
+		if fullVolumeDuration > 0 then
+			task.wait(fullVolumeDuration)
+		end
+
+		if sound and sound.Parent then
+			local fadeTween = TweenService:Create(sound, TweenInfo.new(fadeRealDuration, Enum.EasingStyle.Linear), {
+				Volume = 0,
+			})
+			fadeTween:Play()
+			task.wait(fadeRealDuration)
+		end
+
+		if sound and sound.Parent then
+			sound:Stop()
+			sound:Destroy()
+		end
+	end)
+
+	return sound
+end
+
 local function emitJetpackVisuals(character: Model, duration: number, isLocal: boolean)
 	local jetpack = character:FindFirstChild("Jetpack")
 	if not jetpack then return end
@@ -677,40 +451,6 @@ local function emitJetpackVisuals(character: Model, duration: number, isLocal: b
 		end
 	end
 
-local function playJetpackBurstSound(character: Model, isLocal: boolean): Sound?
-	local jetpack = character:FindFirstChild("Jetpack")
-	local handle = jetpack and jetpack:FindFirstChild("Handle") :: BasePart?
-	local parentPart = handle or character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character.PrimaryPart or character
-
-	local sound = Instance.new("Sound")
-	sound.Name = "JetpackBurstSound"
-	sound.SoundId = JETPACK_BURST_SOUND_ID
-	sound.Volume = isLocal and JETPACK_BURST_VOLUME or (JETPACK_BURST_VOLUME * 0.70)
-	sound.PlaybackSpeed = 1.20 -- 1.20X playback speed as requested
-	sound.RollOffMode = Enum.RollOffMode.InverseTapered
-	sound.RollOffMinDistance = isLocal and 15 or 10
-	sound.RollOffMaxDistance = isLocal and 160 or 120
-	sound.Parent = parentPart
-	sound:Play()
-
-	task.spawn(function()
-		local t0 = os.clock()
-		while sound and sound.Parent and sound.TimeLength <= 0 and (os.clock() - t0) < 1.0 do
-			task.wait(0.03)
-		end
-		local timeLength = (sound and sound.TimeLength > 0) and sound.TimeLength or 2.736
-		-- Cut last 0.3 seconds from the audio track
-		local cutDuration = math.max(0.1, (timeLength - 0.3) / sound.PlaybackSpeed)
-		task.wait(cutDuration)
-		if sound and sound.Parent then
-			sound:Stop()
-			sound:Destroy()
-		end
-	end)
-
-	return sound
-end
-
 	-- 3. Local Camera FOV Punch (+6 degrees)
 	if isLocal and camera then
 		local curFOV = camera.FieldOfView
@@ -743,6 +483,112 @@ end
 	end)
 end
 
+-- ============================================================================
+-- JETPACK WARNING NOTIFICATION (Pure red text at top, smooth fade out, zero UI overlap)
+-- ============================================================================
+local warningToastFrame: Frame? = nil
+local warningToastLabel: TextLabel? = nil
+local warningSessionToken = 0
+
+local function getOrCreateWarningToast(): (Frame, TextLabel)
+	if warningToastFrame and warningToastFrame.Parent and warningToastLabel then
+		return warningToastFrame, warningToastLabel
+	end
+
+	local playerGui = player:WaitForChild("PlayerGui")
+	local targetGui: ScreenGui = (playerGui:FindFirstChild("BidToSurviveUI") :: ScreenGui?)
+		or statusHUD.ScreenGui
+
+	local yOffset = targetGui.IgnoreGuiInset and 108 or 72
+
+	local toastFrame = Instance.new("Frame")
+	toastFrame.Name = "JetpackWarningToast"
+	toastFrame.AnchorPoint = Vector2.new(0.5, 0)
+	toastFrame.Position = UDim2.new(0.5, 0, 0, yOffset)
+	toastFrame.Size = UDim2.new(0, 320, 0, 28)
+	toastFrame.BackgroundTransparency = 1
+	toastFrame.BorderSizePixel = 0
+	toastFrame.ZIndex = 45
+	toastFrame.Visible = false
+
+	local label = Instance.new("TextLabel")
+	label.Name = "WarningLabel"
+	label.Size = UDim2.fromScale(1, 1)
+	label.Position = UDim2.fromScale(0, 0)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBlack
+	label.TextSize = 16
+	label.TextColor3 = Color3.fromRGB(255, 60, 60)
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextStrokeTransparency = 1
+	label.TextTransparency = 1
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.ZIndex = 46
+	label.Parent = toastFrame
+
+	toastFrame.Parent = targetGui
+	warningToastFrame = toastFrame
+	warningToastLabel = label
+
+	return toastFrame, label
+end
+
+local function showJetpackWarning(message: string)
+	local frame, label = getOrCreateWarningToast()
+	warningSessionToken = warningSessionToken + 1
+	local myToken = warningSessionToken
+
+	label.Text = message
+	frame.Visible = true
+
+	local targetGui = frame:FindFirstAncestorWhichIsA("ScreenGui")
+	local baseY = (targetGui and targetGui.IgnoreGuiInset) and 108 or 72
+
+	frame.Position = UDim2.new(0.5, 0, 0, baseY - 6)
+
+	-- Smooth fade-in (pure text)
+	TweenService:Create(frame, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Position = UDim2.new(0.5, 0, 0, baseY),
+	}):Play()
+	TweenService:Create(label, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		TextTransparency = 0,
+		TextStrokeTransparency = 0.25,
+	}):Play()
+
+	-- Subtle error feedback audio
+	pcall(function()
+		local errorTick = Instance.new("Sound")
+		errorTick.SoundId = "rbxassetid://6895079853"
+		errorTick.PlaybackSpeed = 0.65
+		errorTick.Volume = 0.35
+		errorTick.Parent = frame
+		errorTick:Play()
+		Debris:AddItem(errorTick, 0.4)
+	end)
+
+	-- Hold for 1.25s then smooth fade-out
+	task.delay(1.25, function()
+		if myToken ~= warningSessionToken then return end
+		local fadeOutInfo = TweenInfo.new(0.40, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local tFrame = TweenService:Create(frame, fadeOutInfo, {
+			Position = UDim2.new(0.5, 0, 0, baseY - 6),
+		})
+		local tLabel = TweenService:Create(label, fadeOutInfo, {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+		})
+		tFrame:Play()
+		tLabel:Play()
+
+		tFrame.Completed:Once(function()
+			if myToken == warningSessionToken then
+				frame.Visible = false
+			end
+		end)
+	end)
+end
+
 -- Ultra-Responsive Check: whether Shift + Movement + Space conditions are satisfied
 local function canPerformBurst(): boolean
 	if isBursting then return false end
@@ -753,9 +599,7 @@ local function canPerformBurst(): boolean
 	if (os.clock() - lastBurstTime) < JETPACK_COOLDOWN then return false end
 
 	-- Check if player is holding Shift (or sprinting) AND moving
-	local hasShift = isHoldingShift
-		or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-		or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+	local hasShift = isShiftPressed()
 
 	local isMoving = (activeHum.MoveDirection.Magnitude > 0.05)
 		or UserInputService:IsKeyDown(Enum.KeyCode.W)
@@ -796,103 +640,107 @@ local function performJetpackBurst()
 		flatDir.X, flatDir.Z, math.floor(currentEnergy)))
 
 	-- Turn character forward along burst direction (keeping upright)
-	activeHRP.CFrame = CFrame.lookAt(activeHRP.Position, activeHRP.Position + flatDir)
+	pcall(function()
+		activeHRP.CFrame = CFrame.lookAt(activeHRP.Position, activeHRP.Position + flatDir)
+	end)
 
 	-- 1. PLAY SOUND BEFORE ANIMATION / MOVEMENT STARTS
-	playJetpackBurstSound(activeChar, true)
-	task.wait(0.06) -- Crisp pre-ignition beat so sound begins before animation/movement kicks in
+	pcall(function()
+		playJetpackBurstSound(activeChar, true)
+	end)
+	if JETPACK_PRE_LAUNCH_DELAY > 0 then
+		task.wait(JETPACK_PRE_LAUNCH_DELAY)
+	end
 
 	if not activeHRP or not activeHum or activeHum.Health <= 0 then
 		isBursting = false
 		return
 	end
 
-	-- Wall / Obstacle Collision Pre-check: prevent passing through walls
-	local rayParams = RaycastParams.new()
-	rayParams.FilterDescendantsInstances = { activeChar }
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	local burstAtt: Attachment? = nil
+	local burstVel: LinearVelocity? = nil
 
-	local maxDistance = JETPACK_BURST_DISTANCE
-	local wallRay = Workspace:Raycast(activeHRP.Position, flatDir * (JETPACK_BURST_DISTANCE + 1.2), rayParams)
-	if wallRay then
-		maxDistance = math.max(0, wallRay.Distance - 1.2)
-	end
+	local ok, burstErr = pcall(function()
+		-- Wall / Obstacle Collision Pre-check: prevent passing through walls
+		local rayParams = RaycastParams.new()
+		rayParams.FilterDescendantsInstances = { activeChar }
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-	local estimatedDuration = math.clamp(maxDistance / JETPACK_BURST_SPEED, 0.12, 0.25)
-
-	-- Emit visuals (White Backside Trail + Dual Engine Trails + Exhaust) & notify server
-	emitJetpackVisuals(activeChar, estimatedDuration, true)
-	if JetpackBurstEvent then
-		JetpackBurstEvent:FireServer(flatDir)
-	end
-
-	if maxDistance < 0.5 then
-		-- Pressed directly against wall: abort movement safely without clipping
-		isBursting = false
-		syncMovementTracks()
-		return
-	end
-
-	-- BOOST WalkSpeed and apply high-force LinearVelocity so character accelerates massively!
-	activeHum.WalkSpeed = JETPACK_BURST_SPEED
-
-	local burstAtt = Instance.new("Attachment")
-	burstAtt.Name = "JetpackBurstAttachment"
-	burstAtt.Position = Vector3.zero
-	burstAtt.Parent = activeHRP
-
-	local burstVel = Instance.new("LinearVelocity")
-	burstVel.Name = "JetpackBurstVelocity"
-	burstVel.Attachment0 = burstAtt
-	burstVel.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-	burstVel.RelativeTo = Enum.ActuatorRelativeTo.World
-	burstVel.ForceLimitsEnabled = true
-	burstVel.MaxAxesForce = Vector3.new(2000000, 0, 2000000) -- Massive horizontal propulsion, 0 vertical force!
-	burstVel.VectorVelocity = flatDir * JETPACK_BURST_SPEED
-	burstVel.Parent = activeHRP
-
-	-- Initial kick
-	activeHRP.AssemblyLinearVelocity = Vector3.new(flatDir.X * JETPACK_BURST_SPEED, activeHRP.AssemblyLinearVelocity.Y, flatDir.Z * JETPACK_BURST_SPEED)
-
-	local burstStart = os.clock()
-	local startPos = activeHRP.Position
-	local maxTimeout = 0.30 -- Hard safety timeout
-
-	-- Frame-by-frame precision distance tracker: exactly 15 studs!
-	while true do
-		RunService.Heartbeat:Wait()
-		if not activeHRP or not activeHum or activeHum.Health <= 0 then break end
-
-		local currentPos = activeHRP.Position
-		local horizontalDist = ((currentPos - startPos) * Vector3.new(1, 0, 1)).Magnitude
-		if horizontalDist >= maxDistance then
-			break
+		local maxDistance = JETPACK_BURST_DISTANCE
+		local wallRay = Workspace:Raycast(activeHRP.Position, flatDir * (JETPACK_BURST_DISTANCE + 1.2), rayParams)
+		if wallRay then
+			maxDistance = math.max(0, wallRay.Distance - 1.2)
 		end
 
-		if (os.clock() - burstStart) >= maxTimeout then
-			break
+		local estimatedDuration = math.clamp(maxDistance / JETPACK_BURST_SPEED, 0.12, 0.25)
+
+		-- Emit visuals (White Backside Trail + Dual Engine Trails + Exhaust) & notify server
+		pcall(function()
+			emitJetpackVisuals(activeChar, estimatedDuration, true)
+		end)
+		if JetpackBurstEvent then
+			JetpackBurstEvent:FireServer(flatDir)
 		end
 
-		local aheadRay = Workspace:Raycast(currentPos, flatDir * 1.5, rayParams)
-		if aheadRay and aheadRay.Distance < 1.0 then
-			break
+		if maxDistance >= 0.5 and activeHRP and activeHum and activeHum.Health > 0 then
+			-- BOOST WalkSpeed and apply high-force LinearVelocity so character accelerates massively!
+			activeHum.WalkSpeed = JETPACK_BURST_SPEED
+
+			burstAtt = Instance.new("Attachment")
+			burstAtt.Name = "JetpackBurstAttachment"
+			burstAtt.Position = Vector3.zero
+			burstAtt.Parent = activeHRP
+
+			burstVel = Instance.new("LinearVelocity")
+			burstVel.Name = "JetpackBurstVelocity"
+			burstVel.Attachment0 = burstAtt
+			burstVel.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+			burstVel.RelativeTo = Enum.ActuatorRelativeTo.World
+			burstVel.ForceLimitsEnabled = true
+			burstVel.MaxAxesForce = Vector3.new(2000000, 0, 2000000)
+			burstVel.VectorVelocity = flatDir * JETPACK_BURST_SPEED
+			burstVel.Parent = activeHRP
+
+			-- Initial kick
+			activeHRP.AssemblyLinearVelocity = Vector3.new(flatDir.X * JETPACK_BURST_SPEED, activeHRP.AssemblyLinearVelocity.Y, flatDir.Z * JETPACK_BURST_SPEED)
+
+			local burstStart = os.clock()
+			local startPos = activeHRP.Position
+			local maxTimeout = 0.30 -- Hard safety timeout
+
+			while true do
+				RunService.Heartbeat:Wait()
+				if not activeHRP or not activeHum or activeHum.Health <= 0 then break end
+
+				local currentPos = activeHRP.Position
+				local horizontalDist = ((currentPos - startPos) * Vector3.new(1, 0, 1)).Magnitude
+				if horizontalDist >= maxDistance then
+					break
+				end
+
+				if (os.clock() - burstStart) >= maxTimeout then
+					break
+				end
+
+				local aheadRay = Workspace:Raycast(currentPos, flatDir * 1.5, rayParams)
+				if aheadRay and aheadRay.Distance < 1.0 then
+					break
+				end
+			end
 		end
+	end)
+
+	if not ok then
+		warn("[Movement][Jetpack] Error executing burst:", burstErr)
 	end
 
-	local finalPos = activeHRP and activeHRP.Position or startPos
-	local totalTraveled = ((finalPos - startPos) * Vector3.new(1, 0, 1)).Magnitude
-	print(string.format("[Movement][Jetpack] 🏁 Burst complete! Traveled: %.2f studs (Target: %.1f, Speed: %.1f)",
-		totalTraveled, maxDistance, JETPACK_BURST_SPEED))
-
-	-- Cleanup physics controller
-	burstVel:Destroy()
-	burstAtt:Destroy()
+	-- GUARANTEED CLEANUP: Physics controller removal
+	if burstVel then pcall(function() burstVel:Destroy() end) end
+	if burstAtt then pcall(function() burstAtt:Destroy() end) end
 
 	-- Seamlessly restore normal movement / sprint speed
 	if activeHRP and activeHum and activeHum.Health > 0 then
-		local hasShift = isHoldingShift
-			or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+		local hasShift = isShiftPressed()
 		local normalSpeed = hasShift and SPRINT_WALK_SPEED or BASE_WALK_SPEED
 		activeHum.WalkSpeed = normalSpeed
 
@@ -952,7 +800,10 @@ local function setupCharacter(character: Model)
 		warn(string.format("[Movement][Init] ⚠️ R15 Avatar detected! Loaded R15-compatible animations:\n  • Walk: %s\n  • Run: %s", currentWalkAnimId, currentRunAnimId))
 	end
 
-	-- Disable default Roblox 'Animate' script's walk/run interference on R6
+	-- In R6, Roblox default Animate uses "run" for all ground locomotion.
+	-- Setting both "walk" and "run" in Animate to currentWalkAnimId guarantees default movement
+	-- is ALWAYS the clean walk animation without playing the sprint animation during regular walking.
+	-- Custom Sprint is cleanly driven with Action priority on top!
 	local animateScript = character:WaitForChild("Animate", 3)
 	if animateScript and animateScript:IsA("LocalScript") then
 		for _, folderName in ipairs({ "walk", "run" }) do
@@ -960,7 +811,7 @@ local function setupCharacter(character: Model)
 			if folder then
 				for _, anim in ipairs(folder:GetChildren()) do
 					if anim:IsA("Animation") then
-						anim.AnimationId = (folderName == "walk") and currentWalkAnimId or currentRunAnimId
+						anim.AnimationId = currentWalkAnimId
 					end
 				end
 			end
@@ -969,10 +820,20 @@ local function setupCharacter(character: Model)
 
 	local animator = activeHum:WaitForChild("Animator", 5) :: Animator
 	if animator then
-		for _, playingTrack in ipairs(animator:GetPlayingAnimationTracks()) do
-			if playingTrack.Priority == Enum.AnimationPriority.Movement or playingTrack.Priority == Enum.AnimationPriority.Core then
-				playingTrack:Stop(0)
-			end
+		-- Cleanly release any stale tracks from previous character spawn
+		if walkTrack then
+			pcall(function()
+				walkTrack:Stop(0)
+				walkTrack:Destroy()
+			end)
+			walkTrack = nil
+		end
+		if runTrack then
+			pcall(function()
+				runTrack:Stop(0)
+				runTrack:Destroy()
+			end)
+			runTrack = nil
 		end
 
 		local walkAnim = Instance.new("Animation")
@@ -985,8 +846,9 @@ local function setupCharacter(character: Model)
 			ContentProvider:PreloadAsync({ walkAnim, runAnim })
 		end)
 
+		-- Action priority ensures walk/run cleanly overrides core/movement without killing default Idle
 		walkTrack = animator:LoadAnimation(walkAnim)
-		walkTrack.Priority = Enum.AnimationPriority.Movement
+		walkTrack.Priority = Enum.AnimationPriority.Action
 		walkTrack.Looped = true
 
 		runTrack = animator:LoadAnimation(runAnim)
@@ -1029,6 +891,10 @@ local function setupCharacter(character: Model)
 	end)
 
 	activeHum.Running:Connect(function(speed)
+		syncMovementTracks()
+	end)
+
+	activeHum.StateChanged:Connect(function(oldState, newState)
 		syncMovementTracks()
 	end)
 end
@@ -1087,10 +953,21 @@ end
 -- Passes Space to Roblox default controls for normal jumping when not sprinting.
 local function handleSpaceAction(actionName: string, inputState: Enum.UserInputState, inputObject: InputObject)
 	if inputState == Enum.UserInputState.Begin then
-		if canPerformBurst() then
-			print("[Movement][Input] ⌨️ Shift + Move + Space -> Triggering High-Speed Jetpack Burst!")
-			task.spawn(performJetpackBurst)
-			return Enum.ContextActionResult.Sink
+		local hasShift = isShiftPressed()
+		if hasShift or isSprinting then
+			if canPerformBurst() then
+				print("[Movement][Input] ⌨️ Shift + Move + Space -> Triggering High-Speed Jetpack Burst!")
+				task.spawn(performJetpackBurst)
+				return Enum.ContextActionResult.Sink
+			else
+				if exhaustedLockout or currentEnergy < JETPACK_ENERGY_COST then
+					showJetpackWarning("Out of energy!")
+					return Enum.ContextActionResult.Sink
+				elseif (os.clock() - lastBurstTime) < JETPACK_COOLDOWN then
+					showJetpackWarning("Too frequent!")
+					return Enum.ContextActionResult.Sink
+				end
+			end
 		end
 	end
 	return Enum.ContextActionResult.Pass
@@ -1113,9 +990,18 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		syncMovementTracks()
 	elseif input.KeyCode == Enum.KeyCode.Space then
 		-- Fallback check in case ContextActionService was bypassed
-		if canPerformBurst() then
-			print("[Movement][Input] ⌨️ Spacebar fallback detected -> Triggering Jetpack Burst!")
-			task.spawn(performJetpackBurst)
+		local hasShift = isShiftPressed()
+		if hasShift or isSprinting then
+			if canPerformBurst() then
+				print("[Movement][Input] ⌨️ Spacebar fallback detected -> Triggering Jetpack Burst!")
+				task.spawn(performJetpackBurst)
+			else
+				if exhaustedLockout or currentEnergy < JETPACK_ENERGY_COST then
+					showJetpackWarning("Out of energy!")
+				elseif (os.clock() - lastBurstTime) < JETPACK_COOLDOWN then
+					showJetpackWarning("Too frequent!")
+				end
+			end
 		end
 	end
 end)
@@ -1160,22 +1046,20 @@ RunService.RenderStepped:Connect(function(dt)
 	end
 
 	-- Update Comic EP Bar UI
-	local energyRatio = math.clamp(currentEnergy / MAX_ENERGY, 0, 1)
-	energyFill.Size = UDim2.new(energyRatio, 0, 1, 0)
-	energyLabel.Text = string.format("%d", math.floor(currentEnergy))
+	statusHUD:UpdateEnergy(currentEnergy, MAX_ENERGY)
 
 	-- Instant Water Fall Recovery (Play Area -> Walkway)
-	if activeHrp and activeHum and activeHum.Health > 0 then
-		local inPlayArea = (activeHrp.Position.X < -50) or (player:GetAttribute("IsInGame") == true)
-		if inPlayArea and (activeHrp.Position.Y <= 34.5 or activeHum:GetState() == Enum.HumanoidStateType.Swimming) then
+	if activeHRP and activeHum and activeHum.Health > 0 then
+		local inPlayArea = (activeHRP.Position.X < -50) or (player:GetAttribute("IsInGame") == true)
+		if inPlayArea and (activeHRP.Position.Y <= 34.5 or activeHum:GetState() == Enum.HumanoidStateType.Swimming) then
 			local map = Workspace:FindFirstChild("BidToSurviveMap")
 			local gameArea = map and map:FindFirstChild("GameplayArea")
 			local walkway = gameArea and gameArea:FindFirstChild("Walkway")
 			local targetPos = walkway and Vector3.new(walkway.Position.X, walkway.Position.Y + 3.5, walkway.Position.Z)
 				or Vector3.new(-161.5, 72.5, -24.9)
 
-			activeHrp.AssemblyLinearVelocity = Vector3.zero
-			activeHrp.AssemblyAngularVelocity = Vector3.zero
+			activeHRP.AssemblyLinearVelocity = Vector3.zero
+			activeHRP.AssemblyAngularVelocity = Vector3.zero
 			if player.Character then
 				player.Character:PivotTo(CFrame.new(targetPos))
 			end

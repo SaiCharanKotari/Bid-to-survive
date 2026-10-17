@@ -13,6 +13,9 @@
       },
       "GorillaMotionData": {
         "$path": "src/shared/GorillaMotionData.luau"
+      },
+      "ClientUI": {
+        "$path": "src/client/ui"
       }
     },
 
@@ -24,11 +27,23 @@
       "SpawnAndAFKManager": {
         "$path": "src/server/SpawnAndAFKManager.server.luau"
       },
+      "BotManager": {
+        "$path": "src/server/round/BotManager.luau"
+      },
+      "TestPlayerSpawner": {
+        "$path": "src/server/round/TestPlayerSpawner.luau"
+      },
+      "ArenaManager": {
+        "$path": "src/server/round/ArenaManager.luau"
+      },
       "RuinsDoorHandManager": {
-        "$path": "src/server/RuinsDoorHandManager.luau"
+        "$path": "src/server/hazards/RuinsDoorHandManager.luau"
       },
       "CashAndWalletManager": {
-        "$path": "src/server/CashAndWalletManager.luau"
+        "$path": "src/server/economy/CashAndWalletManager.luau"
+      },
+      "GorillaSmashManager": {
+        "$path": "src/server/hazards/GorillaSmashManager.luau"
       },
       "R6AvatarManager": {
         "$path": "src/server/R6AvatarManager.server.luau"

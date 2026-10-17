@@ -1,5 +1,5 @@
 --!strict
--- ServerScriptService/CashAndWalletManager.luau
+-- src/server/economy/CashAndWalletManager.luau
 -- Authoritative server economy manager for Bid-to-survive.
 -- Separates Persistent Lobby Cash (Inventory Money) from In-Game Starting Wallet ($20).
 -- Manages survival-time payout formula: Earned Cash = floor(Seconds Survived) * 20.
@@ -137,18 +137,45 @@ function CashAndWalletManager.StartGameForPlayers(activePlayers: { Player }?)
 	end
 end
 
+-- Helper functions for exact integer-cent economy operations
+local function toCents(dollars: number): number
+	return math.round(dollars * 100)
+end
+
+local function toDollars(cents: number): number
+	return cents / 100
+end
+
 -- ============================================================================
 -- 2. SPEND FROM THE $20 WALLET DURING BIDDING PHASE
+-- Authoritative integer-cent precision preventing floating-point truncation bugs!
 -- ============================================================================
 function CashAndWalletManager.TrySpendFromWallet(player: Player, bidAmount: number): (boolean, number)
-	local currentWallet = player:GetAttribute("Wallet") or 0
-	local cleanBid = math.clamp(math.floor(bidAmount * 100) / 100, 0, currentWallet)
+	if typeof(bidAmount) ~= "number" or bidAmount ~= bidAmount or bidAmount <= 0 then
+		return false, 0
+	end
 
-	local newWallet = math.floor((currentWallet - cleanBid) * 100) / 100
+	local currentWallet = player:GetAttribute("Wallet") or 0
+	local walletCents = toCents(currentWallet)
+	local bidCents = toCents(bidAmount)
+
+	-- Reject bids exceeding current wallet or non-positive
+	if bidCents <= 0 or bidCents > walletCents then
+		warn(string.format("[Economy] ❌ Rejected bid $%.2f from %s (Available wallet: $%.2f)", toDollars(bidCents), player.Name, toDollars(walletCents)))
+		return false, 0
+	end
+
+	local newWalletCents = walletCents - bidCents
+	local cleanBid = toDollars(bidCents)
+	local newWallet = toDollars(newWalletCents)
+
 	player:SetAttribute("Wallet", newWallet)
 	player:SetAttribute("Money", newWallet)
 	player:SetAttribute("CurrentBid", cleanBid)
 	player:SetAttribute("BetTimestamp", os.clock())
+
+	print(string.format("[Economy] 💵 Accepted bid $%.2f from %s. Deducted $%.2f (Previous wallet: $%.2f -> Remaining: $%.2f)",
+		cleanBid, player.Name, cleanBid, toDollars(walletCents), newWallet))
 
 	return true, cleanBid
 end

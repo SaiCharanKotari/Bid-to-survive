@@ -8,6 +8,8 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local RuinsDoorHandManager = require(ServerScriptService:WaitForChild("RuinsDoorHandManager"))
 local CashAndWalletManager = require(ServerScriptService:WaitForChild("CashAndWalletManager"))
+local TestPlayerSpawner = require(ServerScriptService:WaitForChild("TestPlayerSpawner"))
+local ArenaManager = require(ServerScriptService:WaitForChild("ArenaManager"))
 local Network = ReplicatedStorage:WaitForChild("Network")
 
 local StateChanged = Network:WaitForChild("StateChanged")
@@ -57,6 +59,10 @@ local GameplayArea = workspace:FindFirstChild("GameplayArea") or (Map:FindFirstC
 local Walkway = GameplayArea:WaitForChild("Walkway", 5) or GameplayArea:FindFirstChild("Walkway")
 local Executioner = GameplayArea:FindFirstChild("Executioner")
 
+-- Initialize Domain Managers
+TestPlayerSpawner.Init(GameConfig, GameplayArea, Walkway)
+ArenaManager.Init(SpawnArea, GameplayArea, Walkway)
+
 -- State Variables
 local CurrentRound = 0
 local CurrentRoundSession = 0
@@ -74,6 +80,14 @@ local ActiveBots = {}
 --------------------------------------------------------------------------------
 -- UTILITY & STATS
 --------------------------------------------------------------------------------
+
+local function toCents(dollars: number): number
+    return math.round((dollars or 0) * 100)
+end
+
+local function toDollars(cents: number): number
+    return cents / 100
+end
 
 local function GetActivePlayers()
     local active = {}
@@ -184,236 +198,52 @@ local function SyncAllStats()
 end
 
 --------------------------------------------------------------------------------
--- TELEPORTATION SYSTEM
+-- TELEPORTATION & ARENA MANAGEMENT (DELEGATED TO ArenaManager)
 --------------------------------------------------------------------------------
 
 local function TeleportCharacter(char, targetPos)
-    if not char then return end
-    local hrp = char:WaitForChild("HumanoidRootPart", 3)
-    if hrp then
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-        char:PivotTo(CFrame.new(targetPos))
-        task.wait(0.05)
-        char:PivotTo(CFrame.new(targetPos))
-    end
+    ArenaManager.TeleportCharacter(char, targetPos)
 end
 
 local function TeleportToLobby(player)
-    local char = player.Character
-    if not char then return end
-    local lobbySpawn = SpawnArea:FindFirstChild("LobbySpawn")
-    local basePos = lobbySpawn and lobbySpawn.Position or Vector3.new(48.11, 85.14, 2.92)
-    local offset = Vector3.new(math.random(-3, 3), 3.5, math.random(-3, 3))
-    TeleportCharacter(char, basePos + offset)
+    ArenaManager.TeleportToLobby(player)
 end
 
 local function TeleportToArena(player)
-    local char = player.Character
-    if not char then return end
-    local wPos = Walkway.Position
-    local rx = math.random(-45, 45)
-    local rz = math.random(-35, 35)
-    local targetPos = Vector3.new(wPos.X + rx, wPos.Y + 3.5, wPos.Z + rz)
-    TeleportCharacter(char, targetPos)
+    ArenaManager.TeleportToArena(player)
 end
 
 local function RecoverToPlayArea(char)
-    if not char or not char.Parent then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hrp and hum and hum.Health > 0 then
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-        local wPos = Walkway.Position
-        local rx = math.random(-30, 30)
-        local rz = math.random(-30, 30)
-        local safePos = Vector3.new(wPos.X + rx, wPos.Y + 3.5, wPos.Z + rz)
-        char:PivotTo(CFrame.new(safePos))
-        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-    end
+    ArenaManager.RecoverToPlayArea(char)
 end
 
 --------------------------------------------------------------------------------
--- INSTANT WATER FALL RESCUE SYSTEM
--- If any active player or companion bot falls into water while in the play area,
--- instantly take them back onto the play area Walkway!
---------------------------------------------------------------------------------
-local lastWaterRescue = {}
-
-RunService.Heartbeat:Connect(function()
-    local wPos = Walkway.Position
-    local now = os.clock()
-    
-    -- 1. Check all entities in active PlayerData (companion bots and registered players)
-    for userId, data in pairs(PlayerData) do
-        if data.IsAlive and data.ParticipationState == "Active" then
-            local char = data.Character
-            if not char or not char.Parent then
-                if not data.IsBot then
-                    local p = Players:GetPlayerByUserId(userId)
-                    char = p and p.Character
-                    data.Character = char
-                end
-            end
-            
-            if char and char.Parent then
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                if hrp and hum and hum.Health > 0 then
-                    local inPlayArea = (hrp.Position.X < -50)
-                    local hitWater = (hrp.Position.Y <= 34.5) or (hum:GetState() == Enum.HumanoidStateType.Swimming)
-                    
-                    if inPlayArea and hitWater then
-                        if not lastWaterRescue[userId] or (now - lastWaterRescue[userId]) > 0.15 then
-                            lastWaterRescue[userId] = now
-                            RecoverToPlayArea(char)
-                            print(string.format("[WATER RESCUE] Rescued %s (Y=%.1f) back to Play Area Walkway!", data.Name or "Player", hrp.Position.Y))
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    -- 2. Direct safety check for ANY player character in the Play Area side of the map (X < -50)
-    for _, player in ipairs(Players:GetPlayers()) do
-        local char = player.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hrp and hum and hum.Health > 0 then
-            local inPlayArea = (hrp.Position.X < -50) or (player:GetAttribute("IsInGame") == true and hrp.Position.X < 0)
-            local hitWater = (hrp.Position.Y <= 34.5) or (hum:GetState() == Enum.HumanoidStateType.Swimming)
-            if inPlayArea and hitWater then
-                if not lastWaterRescue[player.UserId] or (now - lastWaterRescue[player.UserId]) > 0.15 then
-                    lastWaterRescue[player.UserId] = now
-                    RecoverToPlayArea(char)
-                    print(string.format("[WATER RESCUE] Rescued player %s (Y=%.1f) back to Play Area Walkway!", player.Name, hrp.Position.Y))
-                end
-            end
-        end
-    end
-end)
-
---------------------------------------------------------------------------------
--- BOT CREATION
+-- TEST PLAYERS / BOTS (DELEGATED TO TestPlayerSpawner)
 --------------------------------------------------------------------------------
 
 local function CleanupBots()
-    for _, botData in ipairs(ActiveBots) do
-        if botData.Character and botData.Character.Parent then
-            botData.Character:Destroy()
-        end
-    end
-    ActiveBots = {}
-end
-
-local function CreateBotDummy(name, id, startPos)
-    local animMaker = workspace:FindFirstChild("animation-maker")
-    local botModel
-    if animMaker then
-        botModel = animMaker:Clone()
-    else
-        botModel = Instance.new("Model")
-        local part = Instance.new("Part")
-        part.Name = "HumanoidRootPart"
-        part.Size = Vector3.new(2, 2, 1)
-        part.Parent = botModel
-        local hum = Instance.new("Humanoid")
-        hum.Parent = botModel
-    end
-    
-    botModel.Name = name
-    
-    for _, c in ipairs(botModel:GetDescendants()) do
-        if c:IsA("LuaSourceContainer") or c:IsA("Tool") or c.Name == "PlayPrompt" then
-            c:Destroy()
-        end
-    end
-    
-    local bodyColors = botModel:FindFirstChildOfClass("BodyColors")
-    if bodyColors then
-        bodyColors.TorsoColor3 = Color3.fromRGB(math.random(50, 200), math.random(50, 200), math.random(50, 200))
-    end
-    
-    botModel:PivotTo(CFrame.new(startPos))
-    botModel.Parent = GameplayArea
-    
-    local botData = {
-        UserId = id,
-        Name = name,
-        Money = GameConfig.StartingMoney,
-        Health = GameConfig.MaxHealth,
-        IsAlive = true,
-        IsAFK = false,
-        ParticipationState = "Active",
-        CurrentBid = 0,
-        Votes = 0,
-        IsBot = true,
-        Character = botModel
-    }
-    
-    table.insert(ActiveBots, botData)
-    PlayerData[id] = botData
-    return botData
+    TestPlayerSpawner.CleanupTestPlayers()
+    ActiveBots = TestPlayerSpawner.GetActiveTestPlayers()
 end
 
 local function SetupCompanionBots(targetTotal)
-    CleanupBots()
     local realEligibleCount = #GetReadyEligiblePlayers()
-    if realEligibleCount == 0 then
-        realEligibleCount = #GetLivingRealPlayers()
-    end
-    if realEligibleCount == 0 then
-        realEligibleCount = #Players:GetPlayers()
-    end
-    local botsNeeded = math.max(0, targetTotal - realEligibleCount)
-    local botNames = {
-        "ApeSlayer", "ShadowRunner", "LuckyBids", "AlphaTitan", "RiskHunter",
-        "ViperStrike", "CyberGhost", "BlazeWarrior", "EchoPhantom", "IronClaw"
-    }
-    local wPos = Walkway.Position
-    
-    for i = 1, botsNeeded do
-        local bName = botNames[i] or ("Bot_" .. i)
-        local bId = -200 - i
-        local angle = (i / math.max(1, botsNeeded)) * math.pi * 2
-        local radius = 22 + (i % 3) * 14
-        local spawnPos = Vector3.new(wPos.X + math.cos(angle) * radius, wPos.Y + 3.5, wPos.Z + math.sin(angle) * radius)
-        CreateBotDummy(bName, bId, spawnPos)
-    end
+    if realEligibleCount == 0 then realEligibleCount = #GetLivingRealPlayers() end
+    if realEligibleCount == 0 then realEligibleCount = #Players:GetPlayers() end
+    TestPlayerSpawner.SpawnTestPlayers(targetTotal, realEligibleCount, PlayerData)
+    ActiveBots = TestPlayerSpawner.GetActiveTestPlayers()
 end
 
 --------------------------------------------------------------------------------
--- NEON GREEN BID WINNER GLOW SHIELD (REPLACES TILES)
+-- NEON GREEN BID WINNER GLOW SHIELD (DELEGATED TO ArenaManager)
 --------------------------------------------------------------------------------
 
 local function ClearWinnerGlow()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character then
-            local hl = player.Character:FindFirstChild("SafeBidGlow")
-            if hl then hl:Destroy() end
-        end
-    end
-    for _, bot in ipairs(ActiveBots) do
-        if bot.Character then
-            local hl = bot.Character:FindFirstChild("SafeBidGlow")
-            if hl then hl:Destroy() end
-        end
-    end
+    ArenaManager.ClearWinnerGlow(ActiveBots)
 end
 
 local function ApplyWinnerGlow(char)
-    if not char then return end
-    local old = char:FindFirstChild("SafeBidGlow")
-    if old then old:Destroy() end
-    local hl = Instance.new("Highlight")
-    hl.Name = "SafeBidGlow"
-    hl.FillColor = Color3.fromRGB(0, 255, 120)
-    hl.OutlineColor = Color3.fromRGB(220, 255, 230)
-    hl.FillTransparency = 0.25
-    hl.OutlineTransparency = 0
-    hl.Parent = char
+    ArenaManager.ApplyWinnerGlow(char)
 end
 
 --------------------------------------------------------------------------------
@@ -531,12 +361,8 @@ local function RunMatch(session)
         
         CurrentRound = CurrentRound + 1
         
-        -- Bots remain active if alive
-        for _, bot in ipairs(ActiveBots) do
-            if bot.IsAlive then
-                bot.ParticipationState = "Active"
-            end
-        end
+        -- Test players remain active if alive
+        TestPlayerSpawner.ResetParticipation()
         
         -- Sync stats for current round
         SyncAllStats()
@@ -681,15 +507,8 @@ local function RunMatch(session)
             TeleportToArena(p)
         end
         
-        -- Reset bots to arena in natural circular scatter
-        local wPos = Walkway.Position
-        for i, b in ipairs(ActiveBots) do
-            if b.IsAlive and b.Character then
-                local angle = (i / math.max(1, #ActiveBots)) * math.pi * 2
-                local radius = 22 + (i % 3) * 14
-                b.Character:PivotTo(CFrame.new(wPos.X + math.cos(angle) * radius, wPos.Y + 3.5, wPos.Z + math.sin(angle) * radius))
-            end
-        end
+        -- Reset test players to arena in natural circular scatter
+        TestPlayerSpawner.ScatterTestPlayers()
         
         BroadcastState("Phase1_Spawn", spawnDuration, {
             Round = CurrentRound,
@@ -712,14 +531,8 @@ local function RunMatch(session)
         for _, d in ipairs(living) do
             d.CurrentBid = 0
             d.SubmitTime = nil
-            if d.IsBot then
-                local maxB = math.min(d.Money, math.random(15, 65) / 10)
-                d.CurrentBid = math.floor(maxB * 10) / 10
-                d.SubmitTime = math.random(80, 750) / 100
-                d.Money = math.max(0, d.Money - d.CurrentBid)
-                d.Wallet = d.Money
-            end
         end
+        TestPlayerSpawner.GenerateBids(living)
         
         BroadcastState("Phase3_Bid", bidDuration, { ExposedPlayerId = ExposedPlayerId })
         PromptBid:FireAllClients({
@@ -742,10 +555,12 @@ local function RunMatch(session)
         -- Re-filter active players to guarantee anyone who toggled AFK mid-round is excluded from rankings and safe count
         living = GetActivePlayers()
         
-        -- Tie-breaker sort: Bid DESC, earliest SubmitTime ASC
+        -- Exact integer-cent tie-breaker sort: Bid DESC, earliest SubmitTime ASC
         table.sort(living, function(a, b)
-            if math.abs(a.CurrentBid - b.CurrentBid) > 0.001 then
-                return a.CurrentBid > b.CurrentBid
+            local aCents = math.round((a.CurrentBid or 0) * 100)
+            local bCents = math.round((b.CurrentBid or 0) * 100)
+            if aCents ~= bCents then
+                return aCents > bCents
             end
             return (a.SubmitTime or 999) < (b.SubmitTime or 999)
         end)
@@ -817,6 +632,12 @@ local function RunMatch(session)
         
         BroadcastState("Phase5_Scramble", scrambleDuration, { SafeCount = safeCount })
         
+        -- Autonomous Scramble: Unprotected test players sprint away from danger circle!
+        task.spawn(function()
+            local circleCenter, circleRadius = RuinsDoorHandManager.CalculateTargetDangerCircle(PlayerData)
+            TestPlayerSpawner.ScrambleTestPlayers(circleCenter, circleRadius)
+        end)
+        
         local dmg = math.floor((GameConfig.MaxHealth * CurrentRarity.DamagePercent) / 100)
         
         -- Trigger Phase 6 Hammer Smash notification as the arm apex raise/slam approaches
@@ -853,10 +674,13 @@ local function RunMatch(session)
             for _, bData in ipairs(living) do
                 if bData.IsBot and bData.Character then
                     local isProtected = (bData.Character:FindFirstChild("SafeBidGlow") ~= nil)
-                    if not isProtected then
+                    local wasCaught = (hitPlayers == nil) or (hitSet[bData.Character] or hitSet[bData.Character.Name] or hitSet[bData.UserId])
+                    if not isProtected and wasCaught then
                         bData.Health = math.max(0, bData.Health - dmg)
                         local hum = bData.Character:FindFirstChildOfClass("Humanoid")
                         if hum then hum.Health = bData.Health end
+                        bData.Character:SetAttribute("Health", bData.Health)
+                        bData.Character:SetAttribute("HP", bData.Health)
                     end
                 end
             end
@@ -873,33 +697,7 @@ local function RunMatch(session)
         print(string.format("[ROUND] Settlement START duration=%.1f", settlementDuration))
         local p7Start = os.clock()
         
-        for _, bInfo in ipairs(topBidders) do
-            local realData = PlayerData[bInfo.UserId]
-            if realData and realData.ParticipationState == "Active" then
-                if realData.IsBot then
-                    realData.Money = math.max(0, math.floor((realData.Money - realData.CurrentBid) * 100) / 100)
-                end
-            end
-        end
-        
-        local minBid = (living[#living] and living[#living].CurrentBid) or 0
-        local lowestTieCount = 0
-        for _, d in ipairs(living) do
-            if math.abs(d.CurrentBid - minBid) < 0.001 then
-                lowestTieCount = lowestTieCount + 1
-            end
-        end
-        
         local elims = {}
-        if lowestTieCount > 1 and #living > lowestTieCount then
-            for _, d in ipairs(living) do
-                if math.abs(d.CurrentBid - minBid) < 0.001 then
-                    d.Health = 0
-                    table.insert(elims, d.Name .. " (Lowest Bid Tie)")
-                end
-            end
-        end
-        
         for _, d in ipairs(living) do
             if d.Health <= 0 and d.IsAlive then
                 d.IsAlive = false
@@ -951,7 +749,8 @@ BidSubmitted.OnServerEvent:Connect(function(player, amount)
             return -- Only first valid bid is accepted
         end
         local bid = tonumber(amount)
-        if not bid or bid ~= bid or bid < 0 then
+        if not bid or bid ~= bid or bid <= 0 then
+            warn(string.format("[SECURITY] Rejected non-positive/invalid bid %s from %s", tostring(amount), player.Name))
             return
         end
         local ok, actualBid = CashAndWalletManager.TrySpendFromWallet(player, bid)
@@ -961,6 +760,7 @@ BidSubmitted.OnServerEvent:Connect(function(player, amount)
         data.Wallet = data.Money
         local elapsed = math.max(0.01, os.clock() - PhaseStartTime)
         data.SubmitTime = math.floor(elapsed * 100) / 100
+        SyncStats(player)
         print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs (Wallet remaining: $%.2f)", player.Name, data.CurrentBid, data.SubmitTime, player:GetAttribute("Wallet") or 0))
     else
         warn(string.format("[SECURITY] Rejected bid from inactive/eliminated player %s", player.Name))

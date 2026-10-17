@@ -6,6 +6,6 @@
 /*.rbxl.lock
 
 /assets
-
+.env
 
 sourcemap.json

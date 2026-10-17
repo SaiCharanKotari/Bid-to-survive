@@ -65,8 +65,9 @@ local JETPACK_BURST_SPEED       = 85.0 -- High-speed acceleration feeling (4x sp
 local JETPACK_COOLDOWN          = 1.25
 local JETPACK_ENERGY_COST       = 20
 
--- Sound verified in project assets (from DummyHammer)
-local JETPACK_BURST_SOUND_ID    = "rbxassetid://6241709963"
+-- Author-provided Jetpack Sound (assets/jetpack-sound.mp3)
+local JETPACK_BURST_SOUND_ID    = "rbxasset://sounds/jetpack-sound.mp3"
+local JETPACK_BURST_VOLUME      = 0.85
 
 -- Energy Settings (White / Cyan EP Bar)
 local MAX_ENERGY        = 100
@@ -676,23 +677,47 @@ local function emitJetpackVisuals(character: Model, duration: number, isLocal: b
 		end
 	end
 
-	-- 3. Local Camera FOV Punch (+6 degrees) & Audio
-	if isLocal then
-		local sound = Instance.new("Sound")
-		sound.SoundId = JETPACK_BURST_SOUND_ID
-		sound.Volume = 0.45
-		sound.PlaybackSpeed = 1.35
-		sound.Parent = handle or character
-		sound:Play()
-		Debris:AddItem(sound, 1.0)
+local function playJetpackBurstSound(character: Model, isLocal: boolean): Sound?
+	local jetpack = character:FindFirstChild("Jetpack")
+	local handle = jetpack and jetpack:FindFirstChild("Handle") :: BasePart?
+	local parentPart = handle or character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character.PrimaryPart or character
 
-		if camera then
-			local curFOV = camera.FieldOfView
-			local burstFOV = math.min(100, curFOV + 6)
-			TweenService:Create(camera, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-				FieldOfView = burstFOV
-			}):Play()
+	local sound = Instance.new("Sound")
+	sound.Name = "JetpackBurstSound"
+	sound.SoundId = JETPACK_BURST_SOUND_ID
+	sound.Volume = isLocal and JETPACK_BURST_VOLUME or (JETPACK_BURST_VOLUME * 0.70)
+	sound.PlaybackSpeed = 1.20 -- 1.20X playback speed as requested
+	sound.RollOffMode = Enum.RollOffMode.InverseTapered
+	sound.RollOffMinDistance = isLocal and 15 or 10
+	sound.RollOffMaxDistance = isLocal and 160 or 120
+	sound.Parent = parentPart
+	sound:Play()
+
+	task.spawn(function()
+		local t0 = os.clock()
+		while sound and sound.Parent and sound.TimeLength <= 0 and (os.clock() - t0) < 1.0 do
+			task.wait(0.03)
 		end
+		local timeLength = (sound and sound.TimeLength > 0) and sound.TimeLength or 2.736
+		-- Cut last 0.3 seconds from the audio track
+		local cutDuration = math.max(0.1, (timeLength - 0.3) / sound.PlaybackSpeed)
+		task.wait(cutDuration)
+		if sound and sound.Parent then
+			sound:Stop()
+			sound:Destroy()
+		end
+	end)
+
+	return sound
+end
+
+	-- 3. Local Camera FOV Punch (+6 degrees)
+	if isLocal and camera then
+		local curFOV = camera.FieldOfView
+		local burstFOV = math.min(100, curFOV + 6)
+		TweenService:Create(camera, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			FieldOfView = burstFOV
+		}):Play()
 	end
 
 	-- Safe cleanup after burst duration
@@ -772,6 +797,15 @@ local function performJetpackBurst()
 
 	-- Turn character forward along burst direction (keeping upright)
 	activeHRP.CFrame = CFrame.lookAt(activeHRP.Position, activeHRP.Position + flatDir)
+
+	-- 1. PLAY SOUND BEFORE ANIMATION / MOVEMENT STARTS
+	playJetpackBurstSound(activeChar, true)
+	task.wait(0.06) -- Crisp pre-ignition beat so sound begins before animation/movement kicks in
+
+	if not activeHRP or not activeHum or activeHum.Health <= 0 then
+		isBursting = false
+		return
+	end
 
 	-- Wall / Obstacle Collision Pre-check: prevent passing through walls
 	local rayParams = RaycastParams.new()
@@ -970,10 +1004,10 @@ local function setupCharacter(character: Model)
 
 		-- Step 2 Completion Check: Verify Workspace Map and Ruins Door are ready on client
 		task.spawn(function()
-			local map = Workspace:WaitForChild("BidToSurviveMap", 8)
+			local map = Workspace:FindFirstChild("BidToSurviveMap") or Workspace
 			if map then
-				map:WaitForChild("Ruins door", 8)
-				map:WaitForChild("GameplayArea", 8)
+				local _ = map:FindFirstChild("Ruins door") or Workspace:WaitForChild("Ruins door", 5)
+				local _ = map:FindFirstChild("GameplayArea") or Workspace:WaitForChild("GameplayArea", 5)
 			end
 
 			print(string.format("[BOOT HIERARCHY] 🎬 Step 2: Animations verified (Walk: %.2fs, Run: %.2fs) & map assets ready. Firing ClientLoadReadyEvent.",
@@ -1098,6 +1132,7 @@ end)
 if JetpackBurstReplicatedEvent then
 	JetpackBurstReplicatedEvent.OnClientEvent:Connect(function(burstingPlayer: Player, flatDir: Vector3)
 		if burstingPlayer ~= player and burstingPlayer.Character then
+			playJetpackBurstSound(burstingPlayer.Character, false)
 			emitJetpackVisuals(burstingPlayer.Character, 0.22, false)
 		end
 	end)
@@ -1128,6 +1163,25 @@ RunService.RenderStepped:Connect(function(dt)
 	local energyRatio = math.clamp(currentEnergy / MAX_ENERGY, 0, 1)
 	energyFill.Size = UDim2.new(energyRatio, 0, 1, 0)
 	energyLabel.Text = string.format("%d", math.floor(currentEnergy))
+
+	-- Instant Water Fall Recovery (Play Area -> Walkway)
+	if activeHrp and activeHum and activeHum.Health > 0 then
+		local inPlayArea = (activeHrp.Position.X < -50) or (player:GetAttribute("IsInGame") == true)
+		if inPlayArea and (activeHrp.Position.Y <= 34.5 or activeHum:GetState() == Enum.HumanoidStateType.Swimming) then
+			local map = Workspace:FindFirstChild("BidToSurviveMap")
+			local gameArea = map and map:FindFirstChild("GameplayArea")
+			local walkway = gameArea and gameArea:FindFirstChild("Walkway")
+			local targetPos = walkway and Vector3.new(walkway.Position.X, walkway.Position.Y + 3.5, walkway.Position.Z)
+				or Vector3.new(-161.5, 72.5, -24.9)
+
+			activeHrp.AssemblyLinearVelocity = Vector3.zero
+			activeHrp.AssemblyAngularVelocity = Vector3.zero
+			if player.Character then
+				player.Character:PivotTo(CFrame.new(targetPos))
+			end
+			activeHum:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+	end
 end)
 
 print("[MovementDiveAndHUDClient] Initialized: Walk (90697464892050), Run (125757170550820), High-Speed Jetpack Burst (15-stud) & Unified Stacked HUD.")

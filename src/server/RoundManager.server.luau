@@ -2,6 +2,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
@@ -50,10 +51,10 @@ ClientLoadReadyEvent.OnServerEvent:Connect(function(player)
     print(string.format("[BOOT HIERARCHY] 📥 Received ClientLoadReadyEvent from %s. ClientReady=true", player.Name))
 end)
 
-local Map = workspace:WaitForChild("BidToSurviveMap")
-local SpawnArea = Map:WaitForChild("SpawnArea")
-local GameplayArea = Map:WaitForChild("GameplayArea")
-local Walkway = GameplayArea:WaitForChild("Walkway")
+local Map = workspace:FindFirstChild("BidToSurviveMap") or workspace
+local SpawnArea = workspace:FindFirstChild("SpawnArea") or (Map:FindFirstChild("SpawnArea") or workspace:WaitForChild("SpawnArea", 5))
+local GameplayArea = workspace:FindFirstChild("GameplayArea") or (Map:FindFirstChild("GameplayArea") or workspace:WaitForChild("GameplayArea", 5))
+local Walkway = GameplayArea:WaitForChild("Walkway", 5) or GameplayArea:FindFirstChild("Walkway")
 local Executioner = GameplayArea:FindFirstChild("Executioner")
 
 -- State Variables
@@ -216,6 +217,83 @@ local function TeleportToArena(player)
     local targetPos = Vector3.new(wPos.X + rx, wPos.Y + 3.5, wPos.Z + rz)
     TeleportCharacter(char, targetPos)
 end
+
+local function RecoverToPlayArea(char)
+    if not char or not char.Parent then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hrp and hum and hum.Health > 0 then
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        local wPos = Walkway.Position
+        local rx = math.random(-30, 30)
+        local rz = math.random(-30, 30)
+        local safePos = Vector3.new(wPos.X + rx, wPos.Y + 3.5, wPos.Z + rz)
+        char:PivotTo(CFrame.new(safePos))
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+end
+
+--------------------------------------------------------------------------------
+-- INSTANT WATER FALL RESCUE SYSTEM
+-- If any active player or companion bot falls into water while in the play area,
+-- instantly take them back onto the play area Walkway!
+--------------------------------------------------------------------------------
+local lastWaterRescue = {}
+
+RunService.Heartbeat:Connect(function()
+    local wPos = Walkway.Position
+    local now = os.clock()
+    
+    -- 1. Check all entities in active PlayerData (companion bots and registered players)
+    for userId, data in pairs(PlayerData) do
+        if data.IsAlive and data.ParticipationState == "Active" then
+            local char = data.Character
+            if not char or not char.Parent then
+                if not data.IsBot then
+                    local p = Players:GetPlayerByUserId(userId)
+                    char = p and p.Character
+                    data.Character = char
+                end
+            end
+            
+            if char and char.Parent then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and hum.Health > 0 then
+                    local inPlayArea = (hrp.Position.X < -50)
+                    local hitWater = (hrp.Position.Y <= 34.5) or (hum:GetState() == Enum.HumanoidStateType.Swimming)
+                    
+                    if inPlayArea and hitWater then
+                        if not lastWaterRescue[userId] or (now - lastWaterRescue[userId]) > 0.15 then
+                            lastWaterRescue[userId] = now
+                            RecoverToPlayArea(char)
+                            print(string.format("[WATER RESCUE] Rescued %s (Y=%.1f) back to Play Area Walkway!", data.Name or "Player", hrp.Position.Y))
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    -- 2. Direct safety check for ANY player character in the Play Area side of the map (X < -50)
+    for _, player in ipairs(Players:GetPlayers()) do
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 then
+            local inPlayArea = (hrp.Position.X < -50) or (player:GetAttribute("IsInGame") == true and hrp.Position.X < 0)
+            local hitWater = (hrp.Position.Y <= 34.5) or (hum:GetState() == Enum.HumanoidStateType.Swimming)
+            if inPlayArea and hitWater then
+                if not lastWaterRescue[player.UserId] or (now - lastWaterRescue[player.UserId]) > 0.15 then
+                    lastWaterRescue[player.UserId] = now
+                    RecoverToPlayArea(char)
+                    print(string.format("[WATER RESCUE] Rescued player %s (Y=%.1f) back to Play Area Walkway!", player.Name, hrp.Position.Y))
+                end
+            end
+        end
+    end
+end)
 
 --------------------------------------------------------------------------------
 -- BOT CREATION

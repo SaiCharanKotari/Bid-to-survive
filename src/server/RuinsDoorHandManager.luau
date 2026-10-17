@@ -47,6 +47,14 @@ if not ResetHUDRemote then
 	ResetHUDRemote.Parent = Network or ReplicatedStorage
 end
 
+local EmergeRemote: RemoteEvent = (Network and Network:FindFirstChild("RuinsHandEmergeEvent"))
+	or ReplicatedStorage:FindFirstChild("RuinsHandEmergeEvent") :: any
+if not EmergeRemote then
+	EmergeRemote = Instance.new("RemoteEvent")
+	EmergeRemote.Name = "RuinsHandEmergeEvent"
+	EmergeRemote.Parent = Network or ReplicatedStorage
+end
+
 -- Helper: Converts Studio Position + Studio Orientation (YXZ degrees) to exact CFrame
 local function toStudioCFrame(pos: Vector3, rotDeg: Vector3): CFrame
 	return CFrame.new(pos) * CFrame.fromOrientation(
@@ -83,7 +91,7 @@ local POSES = {
 	DoorOrigin = toStudioCFrame(Vector3.new(-258.076, 112.776, -30.455), Vector3.new(-90, -90, 0)),
 	DoorOpen   = toStudioCFrame(Vector3.new(-258.076, 112.776, -77.145), Vector3.new(-90, -90, 0)),
 
-	BlackHoleTargetScale = 3.804,
+	BlackHoleTargetScale = 5.0,
 	PortalShoulderPivot  = Vector3.new(-258.0, 104.0, -25.0),
 
 	-- 1) Emerge Out of Portal
@@ -684,7 +692,9 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		end
 
 		setBlackholeParticlesEnabled(blackHole, false)
-		if blackHole and blackHole:IsA("Model") then
+		if blackHole and blackHole:IsA("Model") and doorSlide then
+			local doorwayCenter = Vector3.new(blackHole:GetPivot().Position.X, POSES.DoorOrigin.Position.Y, POSES.DoorOrigin.Position.Z)
+			blackHole:PivotTo(CFrame.new(doorwayCenter) * blackHole:GetPivot().Rotation)
 			blackHole:ScaleTo(0.001)
 		end
 
@@ -716,9 +726,11 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 
 		setBlackHoleVisibility(blackHole, true)
 		setBlackholeParticlesEnabled(blackHole, true)
-		tweenBlackHoleScale(blackHole, 0.001, POSES.BlackHoleTargetScale, doorOpenTime, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
 		if doorTween then doorTween.Completed:Wait() else task.wait(doorOpenTime) end
+		if blackHole and blackHole:IsA("Model") then
+			blackHole:ScaleTo(POSES.BlackHoleTargetScale)
+		end
 
 		-- ------------------------------------------------------------------------
 		-- STAGE 2: HAND EMERGES OUT OF PORTAL (0.85s)
@@ -730,6 +742,12 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 			local w = lowerArm.CFrame:PointToWorldSpace(ARM_WRIST_LOCAL)
 			subHand.CFrame = CFrame.new(w) * (lowerArm.CFrame.Rotation * BASE_EMERGE_REL_ROT) * CFrame.new(-HAND_WRIST_LOCAL)
 		end
+
+		local emergencePos = lowerArm and lowerArm.Position or POSES.PortalShoulderPivot
+		if RunService:IsRunning() and RunService:IsServer() then
+			EmergeRemote:FireAllClients(emergencePos, 0.85)
+		end
+		print(string.format("[RuinsDoorHandManager] Stage 2: Hand emergence triggered at %s", tostring(emergencePos)))
 
 		local emergeTween = tweenArticulatedArm(
 			subHand,
@@ -873,7 +891,6 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		if RunService:IsRunning() and RunService:IsServer() then
 			PortalRemote:FireAllClients(false, 1.0, 0.001)
 		end
-		tweenBlackHoleScale(blackHole, POSES.BlackHoleTargetScale, 0.001, 1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
 
 		local closeTween = tweenObjectCFrame(
 			doorSlide,
@@ -882,6 +899,9 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		)
 		if closeTween then closeTween.Completed:Wait() else task.wait(1.0) end
 
+		if blackHole and blackHole:IsA("Model") then
+			blackHole:ScaleTo(0.001)
+		end
 		setBlackHoleVisibility(blackHole, false)
 		setBlackholeParticlesEnabled(blackHole, false)
 

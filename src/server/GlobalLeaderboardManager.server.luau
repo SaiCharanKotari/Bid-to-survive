@@ -112,7 +112,7 @@ local function setupSurfaceGui(part: BasePart): (SurfaceGui, ScrollingFrame)
 	-- Header Panel
 	local headerPanel = Instance.new("Frame")
 	headerPanel.Name = "HeaderPanel"
-	headerPanel.Size = UDim2.new(1, -28, 0, 116)
+	headerPanel.Size = UDim2.new(1, -28, 0, 130)
 	headerPanel.Position = UDim2.new(0, 14, 0, 14)
 	headerPanel.BackgroundColor3 = Color3.fromRGB(18, 14, 12)
 	headerPanel.BorderSizePixel = 0
@@ -122,32 +122,32 @@ local function setupSurfaceGui(part: BasePart): (SurfaceGui, ScrollingFrame)
 	hpCorner.Parent = headerPanel
 	local hpStroke = Instance.new("UIStroke")
 	hpStroke.Color = Color3.fromRGB(255, 185, 35)
-	hpStroke.Thickness = 3.5
+	hpStroke.Thickness = 4
 	hpStroke.Parent = headerPanel
 	headerPanel.Parent = mainCard
 
 	local mainTitle = Instance.new("TextLabel")
-	mainTitle.Size = UDim2.new(1, 0, 0, 52)
+	mainTitle.Size = UDim2.new(1, 0, 0, 64)
 	mainTitle.Position = UDim2.new(0, 0, 0, 8)
 	mainTitle.BackgroundTransparency = 1
 	mainTitle.Text = "GLOBAL TOP 100 CASH"
 	mainTitle.Font = Enum.Font.FredokaOne
-	mainTitle.TextSize = 44
+	mainTitle.TextSize = 58
 	mainTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 	mainTitle.ZIndex = 3
 	local mtStroke = Instance.new("UIStroke")
 	mtStroke.Color = Color3.fromRGB(0, 0, 0)
-	mtStroke.Thickness = 5
+	mtStroke.Thickness = 5.5
 	mtStroke.Parent = mainTitle
 	mainTitle.Parent = headerPanel
 
 	local subTitle = Instance.new("TextLabel")
-	subTitle.Size = UDim2.new(1, 0, 0, 28)
-	subTitle.Position = UDim2.new(0, 0, 0, 62)
+	subTitle.Size = UDim2.new(1, 0, 0, 36)
+	subTitle.Position = UDim2.new(0, 0, 0, 74)
 	subTitle.BackgroundTransparency = 1
 	subTitle.Text = "★ ALL-TIME RICHEST SURVIVORS • SCROLL DOWN FOR ALL 100 ★"
 	subTitle.Font = Enum.Font.GothamBlack
-	subTitle.TextSize = 16
+	subTitle.TextSize = 22
 	subTitle.TextColor3 = Color3.fromRGB(255, 215, 80)
 	subTitle.ZIndex = 3
 	subTitle.Parent = headerPanel
@@ -155,8 +155,8 @@ local function setupSurfaceGui(part: BasePart): (SurfaceGui, ScrollingFrame)
 	-- Columns Title Bar
 	local colBar = Instance.new("Frame")
 	colBar.Name = "ColBar"
-	colBar.Size = UDim2.new(1, -28, 0, 42)
-	colBar.Position = UDim2.new(0, 14, 0, 138)
+	colBar.Size = UDim2.new(1, -28, 0, 48)
+	colBar.Position = UDim2.new(0, 14, 0, 152)
 	colBar.BackgroundColor3 = Color3.fromRGB(25, 20, 18)
 	colBar.BorderSizePixel = 0
 	colBar.ZIndex = 2
@@ -175,30 +175,30 @@ local function setupSurfaceGui(part: BasePart): (SurfaceGui, ScrollingFrame)
 		lbl.BackgroundTransparency = 1
 		lbl.Text = text
 		lbl.Font = Enum.Font.GothamBlack
-		lbl.TextSize = 17
+		lbl.TextSize = 24
 		lbl.TextColor3 = Color3.fromRGB(255, 225, 140)
 		lbl.TextXAlignment = align
 		lbl.ZIndex = 3
 		lbl.Parent = colBar
 	end
 
-	makeColHeader("RANK", UDim2.new(0, 95, 1, 0), UDim2.new(0, 10, 0, 0), Enum.TextXAlignment.Center)
-	makeColHeader("AVATAR", UDim2.new(0, 80, 1, 0), UDim2.new(0, 110, 0, 0), Enum.TextXAlignment.Center)
-	makeColHeader("USERNAME", UDim2.new(0, 310, 1, 0), UDim2.new(0, 195, 0, 0), Enum.TextXAlignment.Left)
+	makeColHeader("RANK", UDim2.new(0, 110, 1, 0), UDim2.new(0, 10, 0, 0), Enum.TextXAlignment.Center)
+	makeColHeader("AVATAR", UDim2.new(0, 90, 1, 0), UDim2.new(0, 125, 0, 0), Enum.TextXAlignment.Center)
+	makeColHeader("USERNAME", UDim2.new(0, 310, 1, 0), UDim2.new(0, 225, 0, 0), Enum.TextXAlignment.Left)
 	makeColHeader("TOTAL CASH", UDim2.new(0, 240, 1, 0), UDim2.new(1, -250, 0, 0), Enum.TextXAlignment.Right)
 	colBar.Parent = mainCard
 
 	-- Scrollable Container for Top 100 rows
 	local scroll = Instance.new("ScrollingFrame")
 	scroll.Name = "LeaderboardScroll"
-	scroll.Size = UDim2.new(1, -28, 1, -192)
-	scroll.Position = UDim2.new(0, 14, 0, 186)
+	scroll.Size = UDim2.new(1, -28, 1, -212)
+	scroll.Position = UDim2.new(0, 14, 0, 206)
 	scroll.BackgroundTransparency = 1
 	scroll.BorderSizePixel = 0
 	scroll.ScrollBarThickness = 12
 	scroll.ScrollBarImageColor3 = Color3.fromRGB(255, 180, 0)
 	scroll.ScrollingEnabled = true
-	scroll.CanvasSize = UDim2.new(0, 0, 0, 100 * 64)
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 100 * 78)
 	scroll.ZIndex = 2
 
 	local sPadding = Instance.new("UIPadding")
@@ -230,7 +230,7 @@ local function populateLeaderboardRows(scroll: ScrollingFrame, entries: { { Rank
 		local rank = entry.Rank
 		local row = Instance.new("Frame")
 		row.Name = "Row_" .. rank
-		row.Size = UDim2.new(1, 0, 0, 58)
+		row.Size = UDim2.new(1, 0, 0, 72)
 		row.LayoutOrder = rank
 		row.BorderSizePixel = 0
 		row.ZIndex = 3
@@ -238,37 +238,37 @@ local function populateLeaderboardRows(scroll: ScrollingFrame, entries: { { Rank
 		-- Rank styling: Gold for #1, Silver for #2, Bronze for #3
 		local rStroke = Instance.new("UIStroke")
 		local rCorner = Instance.new("UICorner")
-		rCorner.CornerRadius = UDim.new(0, 8)
+		rCorner.CornerRadius = UDim.new(0, 10)
 		rCorner.Parent = row
 
 		if rank == 1 then
 			row.BackgroundColor3 = Color3.fromRGB(48, 38, 12)
 			rStroke.Color = Color3.fromRGB(255, 215, 0)
-			rStroke.Thickness = 3
+			rStroke.Thickness = 3.5
 		elseif rank == 2 then
 			row.BackgroundColor3 = Color3.fromRGB(36, 40, 48)
 			rStroke.Color = Color3.fromRGB(210, 225, 240)
-			rStroke.Thickness = 2.5
+			rStroke.Thickness = 3
 		elseif rank == 3 then
 			row.BackgroundColor3 = Color3.fromRGB(42, 28, 16)
 			rStroke.Color = Color3.fromRGB(220, 140, 60)
-			rStroke.Thickness = 2.5
+			rStroke.Thickness = 3
 		else
 			row.BackgroundColor3 = (rank % 2 == 0) and Color3.fromRGB(22, 18, 16) or Color3.fromRGB(28, 22, 18)
 			rStroke.Color = Color3.fromRGB(0, 0, 0)
-			rStroke.Thickness = 1.5
+			rStroke.Thickness = 2
 		end
 		rStroke.Parent = row
 
-		-- 1. Rank Label
+		-- 1. Rank Label (1.5X font)
 		local rankPill = Instance.new("TextLabel")
-		rankPill.Size = UDim2.new(0, 85, 0, 38)
+		rankPill.Size = UDim2.new(0, 105, 0, 46)
 		rankPill.Position = UDim2.new(0, 10, 0.5, 0)
 		rankPill.AnchorPoint = Vector2.new(0, 0.5)
 		rankPill.BackgroundTransparency = 1
 		rankPill.Text = "#" .. tostring(rank)
 		rankPill.Font = Enum.Font.GothamBlack
-		rankPill.TextSize = (rank <= 3) and 24 or 20
+		rankPill.TextSize = (rank <= 3) and 34 or 28
 		if rank == 1 then
 			rankPill.TextColor3 = Color3.fromRGB(255, 225, 60)
 		elseif rank == 2 then
@@ -284,18 +284,18 @@ local function populateLeaderboardRows(scroll: ScrollingFrame, entries: { { Rank
 
 		-- 2. Avatar Thumbnail
 		local avFrame = Instance.new("Frame")
-		avFrame.Size = UDim2.new(0, 46, 0, 46)
-		avFrame.Position = UDim2.new(0, 125, 0.5, 0)
+		avFrame.Size = UDim2.new(0, 56, 0, 56)
+		avFrame.Position = UDim2.new(0, 135, 0.5, 0)
 		avFrame.AnchorPoint = Vector2.new(0, 0.5)
 		avFrame.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
 		avFrame.BorderSizePixel = 0
 		avFrame.ZIndex = 4
 		local avCorner = Instance.new("UICorner")
-		avCorner.CornerRadius = UDim.new(0, 7)
+		avCorner.CornerRadius = UDim.new(0, 8)
 		avCorner.Parent = avFrame
 		local avStroke = Instance.new("UIStroke")
 		avStroke.Color = Color3.fromRGB(0, 0, 0)
-		avStroke.Thickness = 1.5
+		avStroke.Thickness = 2
 		avStroke.Parent = avFrame
 
 		local avImg = Instance.new("ImageLabel")
@@ -307,33 +307,33 @@ local function populateLeaderboardRows(scroll: ScrollingFrame, entries: { { Rank
 		avImg.ScaleType = Enum.ScaleType.Fit
 		avImg.ZIndex = 5
 		local aviCorner = Instance.new("UICorner")
-		aviCorner.CornerRadius = UDim.new(0, 6)
+		aviCorner.CornerRadius = UDim.new(0, 7)
 		aviCorner.Parent = avImg
 		avImg.Parent = avFrame
 		avFrame.Parent = row
 
-		-- 3. Username (Real Roblox Username as specified)
+		-- 3. Username (1.5X font)
 		local userLbl = Instance.new("TextLabel")
 		userLbl.Size = UDim2.new(0, 310, 1, 0)
-		userLbl.Position = UDim2.new(0, 185, 0, 0)
+		userLbl.Position = UDim2.new(0, 210, 0, 0)
 		userLbl.BackgroundTransparency = 1
 		userLbl.Text = entry.Username
 		userLbl.Font = Enum.Font.GothamBold
-		userLbl.TextSize = 20
+		userLbl.TextSize = 28
 		userLbl.TextColor3 = (rank == 1) and Color3.fromRGB(255, 235, 120) or Color3.fromRGB(255, 255, 255)
 		userLbl.TextXAlignment = Enum.TextXAlignment.Left
 		userLbl.TextTruncate = Enum.TextTruncate.AtEnd
 		userLbl.ZIndex = 4
 		userLbl.Parent = row
 
-		-- 4. Total Cash
+		-- 4. Total Cash (1.5X font)
 		local cashLbl = Instance.new("TextLabel")
 		cashLbl.Size = UDim2.new(0, 240, 1, 0)
 		cashLbl.Position = UDim2.new(1, -250, 0, 0)
 		cashLbl.BackgroundTransparency = 1
 		cashLbl.Text = formatCash(entry.Cash)
 		cashLbl.Font = Enum.Font.GothamBlack
-		cashLbl.TextSize = 21
+		cashLbl.TextSize = 30
 		cashLbl.TextColor3 = Color3.fromRGB(255, 215, 60)
 		cashLbl.TextXAlignment = Enum.TextXAlignment.Right
 		cashLbl.ZIndex = 4

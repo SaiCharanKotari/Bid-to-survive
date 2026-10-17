@@ -1,7 +1,11 @@
 --!strict
 -- StarterPlayer/StarterPlayerScripts/RuinsImpactClient.client.luau
--- Client-side 80% Red Danger Zone Telegraph, Black Hole inward suction,
--- portal animation, and hand slam impact VFX system.
+-- Authoritative client-side cinematic audio, telegraph, suction, and impact VFX system.
+-- Synchronizes the 4 author-provided Workspace sound objects:
+-- 1. "Heavy stone door slide" (rbxassetid://83419164428609)
+-- 2. "Blackhole Loop" (rbxassetid://1160209243)
+-- 3. "Skeleton_Emerge" (rbxassetid://102911549900922)
+-- 4. "Skeleton_SlamImpact" (rbxassetid://74149238738530)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -43,6 +47,15 @@ if not TelegraphRemote then
 	TelegraphRemote = fallback :: RemoteEvent
 end
 
+local EmergeRemote: RemoteEvent = (Network and Network:FindFirstChild("RuinsHandEmergeEvent"))
+	or ReplicatedStorage:FindFirstChild("RuinsHandEmergeEvent") :: any
+if not EmergeRemote then
+	local fallback = Instance.new("RemoteEvent")
+	fallback.Name = "RuinsHandEmergeEvent"
+	fallback.Parent = Network or ReplicatedStorage
+	EmergeRemote = fallback :: RemoteEvent
+end
+
 -- Lighting ColorCorrection for high-energy impact flash
 local impactCC = Lighting:FindFirstChild("RuinsImpactCC") :: ColorCorrectionEffect?
 if not impactCC then
@@ -52,7 +65,299 @@ if not impactCC then
 end
 
 -- ============================================================================
--- 1. TELEGRAPH RED WARNING CIRCLE & BLACK HOLE SUCTION
+-- 1. SOUND TEMPLATES & CLEAN 3D POSITIONAL AUDIO MIX
+-- ============================================================================
+local SOUND_NAMES = {
+	DoorSlide = "Heavy stone door slide",
+	BlackholeLoop = "Blackhole Loop",
+	HandEmerge = "Skeleton_Emerge",
+	SlamImpact = "Skeleton_SlamImpact",
+}
+
+-- ============================================================================
+-- [USER VOLUME CONTROLS] Modify any of the 4 sound volume values below:
+-- ============================================================================
+local AUDIO_VOLUMES = {
+	DoorSlide     = 1.37,  -- Heavy stone door slide (Opening & Closing)
+	BlackholeLoop = 0.20,  -- Blackhole atmospheric loop
+	HandEmerge    = 1.69,  -- Skeleton hand emergence
+	SlamImpact    = 2.97,  -- Skeleton ground slam impact
+}
+
+local function getSoundTemplate(soundName: string): Sound?
+	local template = Workspace:FindFirstChild(soundName)
+	if not template or not template:IsA("Sound") then
+		template = Workspace:FindFirstChild(soundName, true) :: any
+	end
+	if not template or not template:IsA("Sound") then
+		template = Workspace:WaitForChild(soundName, 3) :: any
+	end
+	if template and template:IsA("Sound") then
+		return template
+	end
+	warn(string.format("[RuinsAudio] Sound template '%s' not found in Workspace!", soundName))
+	return nil
+end
+
+local activeBlackholeSound: Sound? = nil
+local activeBlackholeFadeTween: Tween? = nil
+local activeDoorSound: Sound? = nil
+local activeEmergeSound: Sound? = nil
+local sequenceStartTime: number = 0
+
+local function cleanupActiveAudio()
+	if activeBlackholeFadeTween then
+		activeBlackholeFadeTween:Cancel()
+		activeBlackholeFadeTween = nil
+	end
+	if activeBlackholeSound then
+		pcall(function()
+			activeBlackholeSound:Stop()
+			activeBlackholeSound:Destroy()
+		end)
+		activeBlackholeSound = nil
+	end
+	if activeDoorSound then
+		pcall(function()
+			activeDoorSound:Stop()
+			activeDoorSound:Destroy()
+		end)
+		activeDoorSound = nil
+	end
+	if activeEmergeSound then
+		pcall(function()
+			activeEmergeSound:Stop()
+			activeEmergeSound:Destroy()
+		end)
+		activeEmergeSound = nil
+	end
+end
+
+local function resolveRuinsInstances(): (BasePart?, Model?, BasePart?)
+	local map = Workspace:FindFirstChild("BidToSurviveMap")
+	local ruinsDoor = (map and (map:FindFirstChild("Ruins door") or map:FindFirstChild("RuinsDoor")))
+		or Workspace:FindFirstChild("Ruins door")
+		or Workspace:FindFirstChild("RuinsDoor")
+		or Workspace:FindFirstChild("Ruins door", true)
+
+	local doorSlide: BasePart? = nil
+	local blackHole: Model? = nil
+	local mainPart: BasePart? = nil
+
+	if ruinsDoor then
+		doorSlide = (ruinsDoor:FindFirstChild("doorSlide", true) or ruinsDoor:FindFirstChild("DoorSlide", true)) :: BasePart?
+		local bh = ruinsDoor:FindFirstChild("Blackhole", true) or ruinsDoor:FindFirstChild("BlackHole", true)
+		if bh and bh:IsA("Model") then
+			blackHole = bh
+			mainPart = (bh:FindFirstChild("Main") or bh.PrimaryPart or bh:FindFirstChildWhichIsA("BasePart", true)) :: BasePart?
+		end
+	end
+
+	return doorSlide, blackHole, mainPart
+end
+
+local function playDoorSlideAudio(doorSlide: BasePart?, isOpening: boolean)
+	local template = getSoundTemplate(SOUND_NAMES.DoorSlide)
+	if not template then return end
+
+	if activeDoorSound then
+		pcall(function()
+			activeDoorSound:Stop()
+			activeDoorSound:Destroy()
+		end)
+		activeDoorSound = nil
+	end
+
+	local s = template:Clone()
+	s.Name = isOpening and "RuinsDoorSlide_Open" or "RuinsDoorSlide_Close"
+	s.Volume = AUDIO_VOLUMES.DoorSlide
+	s.PlaybackSpeed = isOpening and 1.0 or 0.96
+	s.Looped = false
+	s.RollOffMode = Enum.RollOffMode.InverseTapered
+	s.RollOffMinDistance = 25
+	s.RollOffMaxDistance = 450
+
+	if doorSlide then
+		s.Parent = doorSlide
+	else
+		local att = Instance.new("Attachment")
+		att.WorldPosition = Vector3.new(-258.08, 112.78, -30.45)
+		att.Parent = Workspace.Terrain
+		s.Parent = att
+	end
+
+	activeDoorSound = s
+	s:Play()
+
+	s.Ended:Once(function()
+		if activeDoorSound == s then
+			activeDoorSound = nil
+		end
+		s:Destroy()
+	end)
+end
+
+local function startBlackholeLoopAudio(mainPart: BasePart?)
+	local template = getSoundTemplate(SOUND_NAMES.BlackholeLoop)
+	if not template then return end
+
+	if activeBlackholeFadeTween then
+		activeBlackholeFadeTween:Cancel()
+		activeBlackholeFadeTween = nil
+	end
+
+	if activeBlackholeSound then
+		pcall(function()
+			activeBlackholeSound:Stop()
+			activeBlackholeSound:Destroy()
+		end)
+		activeBlackholeSound = nil
+	end
+
+	local s = template:Clone()
+	s.Name = "RuinsBlackholeLoop_Active"
+	s.Volume = AUDIO_VOLUMES.BlackholeLoop
+	s.PlaybackSpeed = 1.0
+	s.Looped = false -- Play black hole sound exactly 1 time
+	s.RollOffMode = Enum.RollOffMode.InverseTapered
+	s.RollOffMinDistance = 20
+	s.RollOffMaxDistance = 350
+
+	if mainPart then
+		s.Parent = mainPart
+	else
+		local att = Instance.new("Attachment")
+		att.WorldPosition = Vector3.new(-266.31, 112.78, -30.45)
+		att.Parent = Workspace.Terrain
+		s.Parent = att
+	end
+
+	activeBlackholeSound = s
+	s:Play()
+	s.Ended:Once(function()
+		if activeBlackholeSound == s then
+			activeBlackholeSound = nil
+		end
+		s:Destroy()
+	end)
+end
+
+local function stopBlackholeLoopAudio(fadeDuration: number?)
+	local s = activeBlackholeSound
+	if not s or not s.IsPlaying then
+		if s then
+			pcall(function() s:Destroy() end)
+			activeBlackholeSound = nil
+		end
+		return
+	end
+
+	local duration = math.clamp(fadeDuration or 0.28, 0.20, 0.35)
+	if activeBlackholeFadeTween then
+		activeBlackholeFadeTween:Cancel()
+		activeBlackholeFadeTween = nil
+	end
+
+	local tween = TweenService:Create(s, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+		Volume = 0
+	})
+	activeBlackholeFadeTween = tween
+
+	tween.Completed:Once(function()
+		if activeBlackholeSound == s then
+			activeBlackholeSound = nil
+		end
+		pcall(function()
+			s:Stop()
+			s:Destroy()
+		end)
+		if activeBlackholeFadeTween == tween then
+			activeBlackholeFadeTween = nil
+		end
+	end)
+	tween:Play()
+end
+
+local function playHandEmergeAudio(emergencePos: Vector3)
+	local template = getSoundTemplate(SOUND_NAMES.HandEmerge)
+	if not template then return end
+
+	if activeEmergeSound then
+		pcall(function()
+			activeEmergeSound:Stop()
+			activeEmergeSound:Destroy()
+		end)
+		activeEmergeSound = nil
+	end
+
+	local att = Instance.new("Attachment")
+	att.Name = "RuinsEmergeAudioAttachment"
+	att.WorldPosition = emergencePos
+	att.Parent = Workspace.Terrain
+
+	local s = template:Clone()
+	s.Name = "RuinsHandEmerge_Active"
+	s.Volume = AUDIO_VOLUMES.HandEmerge
+	s.PlaybackSpeed = 1.0
+	s.Looped = false
+	s.RollOffMode = Enum.RollOffMode.InverseTapered
+	s.RollOffMinDistance = 25
+	s.RollOffMaxDistance = 450
+	s.Parent = att
+
+	activeEmergeSound = s
+	s:Play()
+
+	s.Ended:Once(function()
+		if activeEmergeSound == s then
+			activeEmergeSound = nil
+		end
+		s:Destroy()
+		att:Destroy()
+	end)
+
+	task.delay(s.TimeLength + 0.5, function()
+		if att.Parent then
+			att:Destroy()
+		end
+	end)
+end
+
+local function playSlamImpactAudio(impactPos: Vector3)
+	local template = getSoundTemplate(SOUND_NAMES.SlamImpact)
+	if not template then return end
+
+	local att = Instance.new("Attachment")
+	att.Name = "RuinsImpactAudioAttachment"
+	att.WorldPosition = impactPos
+	att.Parent = Workspace.Terrain
+
+	local s = template:Clone()
+	s.Name = "RuinsSlamImpact_Active"
+	s.Volume = AUDIO_VOLUMES.SlamImpact
+	s.PlaybackSpeed = 1.0
+	s.Looped = false
+	s.RollOffMode = Enum.RollOffMode.InverseTapered
+	s.RollOffMinDistance = 35
+	s.RollOffMaxDistance = 550
+	s.Parent = att
+
+	s:Play()
+
+	s.Ended:Once(function()
+		s:Destroy()
+		att:Destroy()
+	end)
+
+	task.delay(s.TimeLength + 0.5, function()
+		if att.Parent then
+			att:Destroy()
+		end
+	end)
+end
+
+-- ============================================================================
+-- 2. TELEGRAPH RED WARNING CIRCLE & BLACK HOLE SUCTION
 -- ============================================================================
 local activeSuctionConn: RBXScriptConnection? = nil
 
@@ -115,7 +420,7 @@ local function showRedDangerTelegraph(centerPos: Vector3, radius: number, durati
 		Transparency = 0.15
 	}):Play()
 
-	-- D) Extra 1: Black Hole Radial Inward Suction (4.5 studs/sec)
+	-- D) Extra: Black Hole Radial Inward Suction (4.5 studs/sec)
 	if activeSuctionConn then
 		activeSuctionConn:Disconnect()
 		activeSuctionConn = nil
@@ -150,38 +455,8 @@ local function showRedDangerTelegraph(centerPos: Vector3, radius: number, durati
 end
 
 -- ============================================================================
--- 2. HAND SLAM IMPACT VFX
+-- 3. GROUND SMASH CRATER & CAMERA SHAKE
 -- ============================================================================
-local function playSlamAudio(impactPos: Vector3)
-	local attachment = Instance.new("Attachment")
-	attachment.WorldPosition = impactPos
-	attachment.Parent = Workspace.Terrain
-
-	local slamSound = Instance.new("Sound")
-	slamSound.Name = "RuinsEarthquakeSlam"
-	slamSound.SoundId = "rbxassetid://9120386436"
-	slamSound.Volume = 2.8
-	slamSound.PlaybackSpeed = 0.78
-	slamSound.RollOffMaxDistance = 450
-	slamSound.RollOffMode = Enum.RollOffMode.InverseTapered
-	slamSound.Parent = attachment
-	slamSound:Play()
-
-	local debrisSound = Instance.new("Sound")
-	debrisSound.Name = "RuinsDebrisCrunch"
-	debrisSound.SoundId = "rbxassetid://9120386436"
-	debrisSound.Volume = 1.4
-	debrisSound.PlaybackSpeed = 1.35
-	debrisSound.RollOffMaxDistance = 350
-	debrisSound.RollOffMode = Enum.RollOffMode.InverseTapered
-	debrisSound.Parent = attachment
-	debrisSound:Play()
-
-	task.delay(4.5, function()
-		attachment:Destroy()
-	end)
-end
-
 local function spawnGroundDestruction(impactPos: Vector3, circleRadius: number, floorColor: Color3, floorMaterial: Enum.Material)
 	local folder = Instance.new("Folder")
 	folder.Name = "HandGroundSmashVFX"
@@ -221,7 +496,7 @@ local function spawnGroundDestruction(impactPos: Vector3, circleRadius: number, 
 		Transparency = 1
 	}):Play()
 
-	-- 3. Crater Rim Rock Slabs Along the 80% Circle Perimeter
+	-- 3. Crater Rim Rock Slabs Along the Perimeter
 	local numChunks = 20
 	local chunkScale = math.clamp(circleRadius / 16, 1.2, 3.2)
 
@@ -314,14 +589,12 @@ local function shakeCamera(impactPos: Vector3, circleRadius: number)
 end
 
 -- ============================================================================
--- 3. PORTAL & BLACK HOLE CLIENT ANIMATION
+-- 4. PORTAL & BLACK HOLE CLIENT ANIMATION (Synchronized Visuals)
 -- ============================================================================
 local portalConn: RBXScriptConnection? = nil
 
 local function animateClientPortal(isOpen: boolean, duration: number, targetScale: number)
-	local ruinsDoor = Workspace:FindFirstChild("Ruins door") or Workspace:FindFirstChild("RuinsDoor")
-	if not ruinsDoor then return end
-	local bh = ruinsDoor:FindFirstChild("Blackhole", true) or ruinsDoor:FindFirstChild("BlackHole", true)
+	local doorSlide, bh, mainPart = resolveRuinsInstances()
 	if not bh or not bh:IsA("Model") then return end
 
 	for _, d in ipairs(bh:GetDescendants()) do
@@ -329,6 +602,14 @@ local function animateClientPortal(isOpen: boolean, duration: number, targetScal
 			d.Anchored = true
 			d.CanCollide = false
 		end
+	end
+
+	-- Center black hole only on opening using fixed doorway coordinates so it never snaps to the open door position on close!
+	if isOpen then
+		local FIXED_DOORWAY_Y = 112.776
+		local FIXED_DOORWAY_Z = -30.455
+		local doorwayCenter = Vector3.new(bh:GetPivot().Position.X, FIXED_DOORWAY_Y, FIXED_DOORWAY_Z)
+		bh:PivotTo(CFrame.new(doorwayCenter) * bh:GetPivot().Rotation)
 	end
 
 	if portalConn then
@@ -347,20 +628,6 @@ local function animateClientPortal(isOpen: boolean, duration: number, targetScal
 				d.Enabled = true
 				d:Clear()
 			end
-		end
-
-		local mainPart = bh:FindFirstChild("Main")
-		if mainPart and mainPart:IsA("BasePart") then
-			local sound = Instance.new("Sound")
-			sound.Name = "RuinsPortalOpenAudio"
-			sound.SoundId = "rbxassetid://9120386436"
-			sound.Volume = 1.6
-			sound.PlaybackSpeed = 1.45
-			sound.RollOffMaxDistance = 350
-			sound.RollOffMode = Enum.RollOffMode.InverseTapered
-			sound.Parent = mainPart
-			sound:Play()
-			task.delay(4, function() sound:Destroy() end)
 		end
 	end
 
@@ -411,19 +678,48 @@ local function animateClientPortal(isOpen: boolean, duration: number, targetScal
 end
 
 -- ============================================================================
--- REMOTE EVENT LISTENERS
+-- 5. REMOTE EVENT LISTENERS (Authoritative Synchronization)
 -- ============================================================================
 TelegraphRemote.OnClientEvent:Connect(showRedDangerTelegraph)
 
 PortalRemote.OnClientEvent:Connect(function(isOpen: boolean, duration: number, targetScale: number)
-	animateClientPortal(isOpen, duration or (isOpen and 1.35 or 1.0), targetScale or (isOpen and 3.804 or 0.001))
+	local doorSlide, bh, mainPart = resolveRuinsInstances()
+	local animDuration = duration or (isOpen and 1.35 or 1.0)
+	local finalScale = targetScale or (isOpen and 5.0 or 0.001)
+
+	if isOpen then
+		-- Phase 1 & 2: Clean up any previous round audio and start synchronized opening
+		cleanupActiveAudio()
+		sequenceStartTime = os.clock()
+
+		print(string.format("[RuinsAudio] [T+0.00s] Door opening: Heavy stone door slide & Blackhole Loop started (duration=%.2fs, scale=%.1f)", animDuration, finalScale))
+		playDoorSlideAudio(doorSlide, true)
+		startBlackholeLoopAudio(mainPart)
+		animateClientPortal(true, animDuration, finalScale)
+	else
+		-- Phase 3: Portal closing, loop audio fades out over ~0.28s, door closing replay
+		local elapsed = (sequenceStartTime > 0) and (os.clock() - sequenceStartTime) or 0
+		print(string.format("[RuinsAudio] [T+%.2fs] Portal closing: Blackhole Loop fading out, Heavy stone door slide replay (duration=%.2fs)", elapsed, animDuration))
+		stopBlackholeLoopAudio(0.28)
+		playDoorSlideAudio(doorSlide, false)
+		animateClientPortal(false, animDuration, 0.001)
+	end
+end)
+
+EmergeRemote.OnClientEvent:Connect(function(emergencePos: Vector3, duration: number)
+	local elapsed = (sequenceStartTime > 0) and (os.clock() - sequenceStartTime) or 0
+	print(string.format("[RuinsAudio] [T+%.2fs] Hand emergence: Skeleton_Emerge triggered at %s", elapsed, tostring(emergencePos)))
+	playHandEmergeAudio(emergencePos)
 end)
 
 ImpactRemote.OnClientEvent:Connect(function(impactPos, handSize, floorColor, floorMaterial, circleRadius)
+	local elapsed = (sequenceStartTime > 0) and (os.clock() - sequenceStartTime) or 0
 	local radius = circleRadius or (math.max(handSize.X, handSize.Z) * 0.5)
-	playSlamAudio(impactPos)
+
+	print(string.format("[RuinsAudio] [T+%.2fs] Ground impact: Skeleton_SlamImpact triggered at %s (radius=%.1f)", elapsed, tostring(impactPos), radius))
+	playSlamImpactAudio(impactPos)
 	spawnGroundDestruction(impactPos, radius, floorColor or Color3.fromRGB(58, 125, 21), floorMaterial or Enum.Material.Plastic)
 	shakeCamera(impactPos, radius)
 end)
 
-print("[RuinsImpactClient] Loaded and listening for RuinsHandImpactEvent, RuinsPortalEvent, and RuinsTelegraphEvent.")
+print("[RuinsImpactClient] Professional 3D Audio System loaded with 4 Workspace sound templates.")

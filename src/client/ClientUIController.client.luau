@@ -5,8 +5,11 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 local ContentProvider = game:GetService("ContentProvider")
+local UserInputService = game:GetService("UserInputService")
+local Debris = game:GetService("Debris")
 
 local LocalPlayer = Players.LocalPlayer
+local player = LocalPlayer
 local Camera = workspace.CurrentCamera
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
@@ -247,57 +250,218 @@ end
 
 local rouletteContainer = gui:FindFirstChild("RouletteContainer") or Instance.new("Frame")
 rouletteContainer.Name = "RouletteContainer"
-rouletteContainer.Size = UDim2.new(0, 340, 0, 340)
-rouletteContainer.Position = UDim2.new(0.5, -170, 0.42, -170)
+rouletteContainer.Size = UDim2.new(0, 646, 0, 257)
+rouletteContainer.Position = UDim2.new(0.5, 0, 0.40, 0)
+rouletteContainer.AnchorPoint = Vector2.new(0.5, 0.5)
 rouletteContainer.BackgroundTransparency = 1
 rouletteContainer.BorderSizePixel = 0
 rouletteContainer.Visible = false
 rouletteContainer.ZIndex = 30
 rouletteContainer.Parent = gui
 
--- Remove any old square GlowHalo shadow to keep floating hammer visuals 100% clean
-local oldHalo = rouletteContainer:FindFirstChild("GlowHalo")
-if oldHalo then
-    oldHalo:Destroy()
+-- Dynamic Responsive Scaling (Scale 1.25x size as requested, cleanly adapted to viewport)
+local rouletteScale = rouletteContainer:FindFirstChild("RouletteScale") or Instance.new("UIScale")
+rouletteScale.Name = "RouletteScale"
+rouletteScale.Parent = rouletteContainer
+
+local function updateRouletteResponsiveScale()
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    local scaleW = (vp.X - 32) / 670
+    local scaleH = (vp.Y - 120) / 380
+    -- Multiplied by 1.25x to make the hammer SVG size 1.25x as requested!
+    rouletteScale.Scale = 1.25 * math.clamp(math.min(scaleW, scaleH), 0.52, 1.0)
 end
+task.defer(updateRouletteResponsiveScale)
+Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+    updateRouletteResponsiveScale()
+end)
 
-local hammerIcon = rouletteContainer:FindFirstChild("HammerIcon") or Instance.new("ImageLabel")
-hammerIcon.Name = "HammerIcon"
-hammerIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-hammerIcon.Size = UDim2.new(0, 220, 0, 220)
-hammerIcon.Position = UDim2.new(0.5, 0, 0, 135)
-hammerIcon.BackgroundTransparency = 1
-hammerIcon.BorderSizePixel = 0
-hammerIcon.ScaleType = Enum.ScaleType.Fit
-hammerIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
-hammerIcon.ZIndex = 33
-hammerIcon.Parent = rouletteContainer
+-- 1. SVG.5 BACKGROUND CONTAINER (#FF7700 with rounded corners, 3px black stroke, and 3 slots)
+local rouletteBg = rouletteContainer:FindFirstChild("RouletteBg") or Instance.new("ImageLabel")
+rouletteBg.Name = "RouletteBg"
+rouletteBg.Size = UDim2.new(1, 0, 1, 0)
+rouletteBg.Position = UDim2.new(0, 0, 0, 0)
+rouletteBg.BackgroundTransparency = 1
+rouletteBg.Image = "rbxasset://textures/spin_bg.png"
+rouletteBg.ScaleType = Enum.ScaleType.Fit
+rouletteBg.ZIndex = 31
+rouletteBg.Parent = rouletteContainer
 
+-- Fallback Frame in case local texture is loading
+local rouletteBgFallback = rouletteContainer:FindFirstChild("RouletteBgFallback") or Instance.new("Frame")
+rouletteBgFallback.Name = "RouletteBgFallback"
+rouletteBgFallback.Size = UDim2.new(1, 0, 1, 0)
+rouletteBgFallback.BackgroundColor3 = Color3.fromRGB(255, 119, 0)
+rouletteBgFallback.BackgroundTransparency = 0
+rouletteBgFallback.ZIndex = 30
+local bgCorner = Instance.new("UICorner")
+bgCorner.CornerRadius = UDim.new(0, 13)
+bgCorner.Parent = rouletteBgFallback
+local bgStroke = Instance.new("UIStroke")
+bgStroke.Color = Color3.fromRGB(0, 0, 0)
+bgStroke.Thickness = 3
+bgStroke.Parent = rouletteBgFallback
+rouletteBgFallback.Parent = rouletteContainer
+
+-- 2. REEL CLIPPER VIEWPORT (Clipped to the 3-slot arena)
+-- Coordinates aligned with svg.5 slots: width 566, height 200, centered
+local reelClipper = rouletteContainer:FindFirstChild("ReelClipper") or Instance.new("Frame")
+reelClipper.Name = "ReelClipper"
+reelClipper.Size = UDim2.new(0, 566, 0, 200)
+reelClipper.Position = UDim2.new(0.5, 0, 0.5, 0)
+reelClipper.AnchorPoint = Vector2.new(0.5, 0.5)
+reelClipper.BackgroundTransparency = 1
+reelClipper.BorderSizePixel = 0
+reelClipper.ClipsDescendants = true
+reelClipper.ZIndex = 33
+reelClipper.Parent = rouletteContainer
+
+-- Fade Gradient over edges of the Reel (blends cards into the Left & Right tapered orange gradients)
+local clipperGradient = reelClipper:FindFirstChild("ClipperGradient") or Instance.new("UIGradient")
+clipperGradient.Name = "ClipperGradient"
+clipperGradient.Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0.00, 1.00),
+    NumberSequenceKeypoint.new(0.08, 0.50),
+    NumberSequenceKeypoint.new(0.20, 0.00),
+    NumberSequenceKeypoint.new(0.80, 0.00),
+    NumberSequenceKeypoint.new(0.92, 0.50),
+    NumberSequenceKeypoint.new(1.00, 1.00),
+})
+clipperGradient.Parent = reelClipper
+
+-- Moving Track for Cards
+local reelTrack = reelClipper:FindFirstChild("ReelTrack") or Instance.new("Frame")
+reelTrack.Name = "ReelTrack"
+reelTrack.Size = UDim2.new(0, 15000, 1, 0)
+reelTrack.Position = UDim2.new(0, 0, 0, 0)
+reelTrack.BackgroundTransparency = 1
+reelTrack.BorderSizePixel = 0
+reelTrack.ZIndex = 33
+reelTrack.Parent = reelClipper
+
+-- 3. CENTER RESULT SLOT FRAME (Prominent White-Bordered Window from svg.5)
+local centerSlotFrame = rouletteContainer:FindFirstChild("CenterSlotFrame") or Instance.new("Frame")
+centerSlotFrame.Name = "CenterSlotFrame"
+centerSlotFrame.Size = UDim2.new(0, 199, 0, 199)
+centerSlotFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+centerSlotFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+centerSlotFrame.BackgroundTransparency = 1
+centerSlotFrame.BorderSizePixel = 0
+centerSlotFrame.ZIndex = 36
+local csCorner = Instance.new("UICorner")
+csCorner.CornerRadius = UDim.new(0, 5)
+csCorner.Parent = centerSlotFrame
+local csStroke = Instance.new("UIStroke")
+csStroke.Name = "CenterStroke"
+csStroke.Color = Color3.fromRGB(255, 255, 255)
+csStroke.Thickness = 2.5
+csStroke.Parent = centerSlotFrame
+
+-- Top Target Indicator Chevron (Pointing down into winning middle slot)
+local topPointer = centerSlotFrame:FindFirstChild("TopPointer") or Instance.new("Frame")
+topPointer.Name = "TopPointer"
+topPointer.Size = UDim2.new(0, 26, 0, 15)
+topPointer.Position = UDim2.new(0.5, 0, 0, -3)
+topPointer.AnchorPoint = Vector2.new(0.5, 1)
+topPointer.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+topPointer.BorderSizePixel = 0
+topPointer.ZIndex = 40
+local tpCorner = topPointer:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+tpCorner.CornerRadius = UDim.new(0, 3)
+tpCorner.Parent = topPointer
+local tpStroke = topPointer:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
+tpStroke.Color = Color3.fromRGB(0, 0, 0)
+tpStroke.Thickness = 2
+tpStroke.Parent = topPointer
+local tpArrow = topPointer:FindFirstChild("Arrow") or Instance.new("TextLabel")
+tpArrow.Name = "Arrow"
+tpArrow.Size = UDim2.new(1, 0, 1, 0)
+tpArrow.BackgroundTransparency = 1
+tpArrow.Font = Enum.Font.GothamBlack
+tpArrow.TextSize = 13
+tpArrow.TextColor3 = Color3.fromRGB(0, 0, 0)
+tpArrow.Text = "▼"
+tpArrow.ZIndex = 41
+tpArrow.Parent = topPointer
+topPointer.Parent = centerSlotFrame
+
+-- Bottom Target Indicator Chevron (Pointing up into winning middle slot)
+local bottomPointer = centerSlotFrame:FindFirstChild("BottomPointer") or Instance.new("Frame")
+bottomPointer.Name = "BottomPointer"
+bottomPointer.Size = UDim2.new(0, 26, 0, 15)
+bottomPointer.Position = UDim2.new(0.5, 0, 1, 3)
+bottomPointer.AnchorPoint = Vector2.new(0.5, 0)
+bottomPointer.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+bottomPointer.BorderSizePixel = 0
+bottomPointer.ZIndex = 40
+local bpCorner = bottomPointer:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
+bpCorner.CornerRadius = UDim.new(0, 3)
+bpCorner.Parent = bottomPointer
+local bpStroke = bottomPointer:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
+bpStroke.Color = Color3.fromRGB(0, 0, 0)
+bpStroke.Thickness = 2
+bpStroke.Parent = bottomPointer
+local bpArrow = bottomPointer:FindFirstChild("Arrow") or Instance.new("TextLabel")
+bpArrow.Name = "Arrow"
+bpArrow.Size = UDim2.new(1, 0, 1, 0)
+bpArrow.BackgroundTransparency = 1
+bpArrow.Font = Enum.Font.GothamBlack
+bpArrow.TextSize = 13
+bpArrow.TextColor3 = Color3.fromRGB(0, 0, 0)
+bpArrow.Text = "▲"
+bpArrow.ZIndex = 41
+bpArrow.Parent = bottomPointer
+bottomPointer.Parent = centerSlotFrame
+
+-- Golden Victory Sunburst Rays (Rotating behind winning hammer)
+local sunburstRays = centerSlotFrame:FindFirstChild("SunburstRays") or Instance.new("ImageLabel")
+sunburstRays.Name = "SunburstRays"
+sunburstRays.Size = UDim2.new(0, 185, 0, 185)
+sunburstRays.Position = UDim2.new(0.5, 0, 0.5, -8)
+sunburstRays.AnchorPoint = Vector2.new(0.5, 0.5)
+sunburstRays.BackgroundTransparency = 1
+sunburstRays.Image = "rbxassetid://2583861218"
+sunburstRays.ImageColor3 = Color3.fromRGB(255, 225, 100)
+sunburstRays.ImageTransparency = 1
+sunburstRays.ScaleType = Enum.ScaleType.Fit
+sunburstRays.ZIndex = 32
+sunburstRays.Visible = false
+sunburstRays.Parent = centerSlotFrame
+
+centerSlotFrame.Parent = rouletteContainer
+
+-- 4. BELOW CONTAINER: RARITY TITLE & DAMAGE BADGE/TITLE (Hidden; damage shown directly inside middle slot as +XX dmg)
 local rarityTitle = rouletteContainer:FindFirstChild("RarityTitle") or Instance.new("TextLabel")
 rarityTitle.Name = "RarityTitle"
 rarityTitle.Size = UDim2.new(1, 0, 0, 32)
-rarityTitle.Position = UDim2.new(0, 0, 0, 255)
+rarityTitle.Position = UDim2.new(0.5, 0, 1, 12)
+rarityTitle.AnchorPoint = Vector2.new(0.5, 0)
 rarityTitle.BackgroundTransparency = 1
 rarityTitle.Font = Enum.Font.GothamBlack
 rarityTitle.TextSize = 24
 rarityTitle.TextXAlignment = Enum.TextXAlignment.Center
-rarityTitle.TextStrokeTransparency = 0.25
+rarityTitle.TextStrokeTransparency = 0.15
 rarityTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-rarityTitle.ZIndex = 33
+rarityTitle.Visible = false
+rarityTitle.ZIndex = 35
 rarityTitle.Parent = rouletteContainer
 
 local damageTitle = rouletteContainer:FindFirstChild("DamageTitle") or Instance.new("TextLabel")
 damageTitle.Name = "DamageTitle"
-damageTitle.Size = UDim2.new(1, 0, 0, 22)
-damageTitle.Position = UDim2.new(0, 0, 0, 288)
+damageTitle.Size = UDim2.new(1, 0, 0, 24)
+damageTitle.Position = UDim2.new(0.5, 0, 1, 44)
+damageTitle.AnchorPoint = Vector2.new(0.5, 0)
 damageTitle.BackgroundTransparency = 1
 damageTitle.Font = Enum.Font.GothamBold
-damageTitle.TextSize = 16
+damageTitle.TextSize = 17
 damageTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
-damageTitle.TextStrokeTransparency = 0.35
+damageTitle.TextStrokeTransparency = 0.25
 damageTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 damageTitle.TextXAlignment = Enum.TextXAlignment.Center
-damageTitle.ZIndex = 33
+damageTitle.Visible = false
+damageTitle.ZIndex = 35
 damageTitle.Parent = rouletteContainer
 
 --------------------------------------------------------------------------------
@@ -518,91 +682,283 @@ reopenRankBtn.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- 5. HAMMER ROULETTE (GUARANTEED 100% VISIBLE WITH WORKING ASSET FALLBACK)
+-- 5. NEW 3-SLOT HORIZONTAL LEFT-TO-RIGHT HAMMER SPIN SYSTEM (SVG.5)
 --------------------------------------------------------------------------------
-local function SetHammerVisual(rarityData)
-    if not rarityData then return end
-    
-    local assetId = rarityData.AssetId
-    if not assetId or assetId == "" or PendingAssets[assetId] then
-        assetId = VERIFIED_BASE_HAMMER
-    end
-    
-    hammerIcon.Image = assetId
-    hammerIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
-    rarityTitle.Text = string.format("🔨 %s HAMMER", (rarityData.Name or "COMMON"):upper())
-    rarityTitle.TextColor3 = rarityData.GlowColor or rarityData.Color or Color3.fromRGB(255, 255, 255)
-    damageTitle.Text = string.format("DEALS %d%% HP DAMAGE", rarityData.DamagePercent or 30)
-end
-
 local function PlayHammerRoulette(targetRarity, totalDuration, spinnerReel)
     if IsRoulettePlaying or (not IsActiveInRound()) then return end
     IsRoulettePlaying = true
     local myToken = SessionToken
     
-    rouletteContainer.Visible = true
-    hammerIcon.ImageTransparency = 0
-    hammerIcon.Size = UDim2.new(0, 220, 0, 220)
-    hammerIcon.Position = UDim2.new(0.5, 0, 0, 135)
-    hammerIcon.Rotation = 0
-    rarityTitle.TextTransparency = 0
-    damageTitle.TextTransparency = 0
+    updateRouletteResponsiveScale()
     
-    local delays = {
-        0.10, 0.10, 0.11, 0.11, 0.12, 0.13, 0.14, 0.16,
-        0.18, 0.20, 0.23, 0.27, 0.31, 0.36, 0.42, 0.50,
-        0.60, 0.72, 0.85
-    }
+    -- Ensure external titles below box stay hidden (user image shows only the 646x257 box)
+    rarityTitle.Visible = false
+    damageTitle.Visible = false
     
-    -- Use server-provided anti-repeat randomized reel or generate local fallback
-    local reel = spinnerReel
-    if not reel or #reel < #delays then
-        if GameConfig.BuildRandomSpinnerStrip then
-            reel = GameConfig.BuildRandomSpinnerStrip(CurrentRound or 1, #delays, #delays, targetRarity.Name)
-        else
-            reel = {}
-            local order = GameConfig.RarityOrder or {"Common", "Uncommon", "Rare", "Legendary", "Mythical"}
-            for i = 1, #delays do
-                reel[i] = order[((i - 1) % #order) + 1]
+    -- Reset center highlight stroke to pristine white
+    local csStroke = centerSlotFrame:FindFirstChild("CenterStroke") :: UIStroke?
+    if csStroke then
+        csStroke.Color = Color3.fromRGB(255, 255, 255)
+        csStroke.Thickness = 2.0
+        csStroke.Transparency = 0
+    end
+    
+    -- Clear previous items on reelTrack
+    for _, child in ipairs(reelTrack:GetChildren()) do
+        if child:IsA("GuiObject") then
+            child:Destroy()
+        end
+    end
+    
+    local CARD_STEP = 190 -- Exactly 190px spacing between left (93), center (283), and right (473)
+    local TOTAL_CARDS = 60 -- Big array of hammers!
+    local WIN_INDEX = 10 -- Target hammer arrives at index 10
+    local SPIN_TRAVEL_CARDS = 35 -- 35 cards glide past from left to right!
+    
+    -- Build randomized reel with diverse rarities ending on targetRarity
+    local raritiesList = GameConfig.GetRarityList and GameConfig.GetRarityList() or {}
+    if #raritiesList == 0 then
+        for _, name in ipairs(GameConfig.RarityOrder or {"Common", "Uncommon", "Rare", "Legendary", "Mythical"}) do
+            table.insert(raritiesList, GameConfig.HammerRarities[name])
+        end
+    end
+    
+    local reelData = {}
+    for i = 1, TOTAL_CARDS do
+        if i == WIN_INDEX then
+            reelData[i] = targetRarity
+        elseif i == WIN_INDEX + 1 then
+            -- Hammer that lands in the right slot: golden Legendary/Mythical hammer like mockup
+            local alt = GameConfig.HammerRarities.Legendary or GameConfig.HammerRarities.Mythical
+            if alt and alt.Name == targetRarity.Name then
+                alt = GameConfig.HammerRarities.Rare or GameConfig.HammerRarities.Common
             end
-            reel[#delays] = targetRarity.Name
+            reelData[i] = alt or targetRarity
+        elseif i == WIN_INDEX - 1 then
+            -- Hammer that lands in the left slot
+            local alt = GameConfig.HammerRarities.Rare or GameConfig.HammerRarities.Uncommon
+            if alt and alt.Name == targetRarity.Name then
+                alt = GameConfig.HammerRarities.Common
+            end
+            reelData[i] = alt or targetRarity
+        elseif spinnerReel and spinnerReel[i] and GameConfig.HammerRarities[spinnerReel[i]] then
+            reelData[i] = GameConfig.HammerRarities[spinnerReel[i]]
+        else
+            local pick = raritiesList[math.random(1, #raritiesList)]
+            if i > 1 and reelData[i - 1] and reelData[i - 1].Name == pick.Name then
+                local alt = raritiesList[(math.random(1, #raritiesList - 1))]
+                pick = (alt and alt.Name ~= pick.Name) and alt or raritiesList[1]
+            end
+            reelData[i] = pick or targetRarity
         end
     end
     
-    for i, delay in ipairs(delays) do
-        if (not IsActiveInRound()) or myToken ~= SessionToken then
-            rouletteContainer.Visible = false
-            IsRoulettePlaying = false
-            return
+    -- Populate hammer items (NO card backgrounds, NO borders; purely floating hammers + "+XX dmg" text)
+    local items = {}
+    for i = 1, TOTAL_CARDS do
+        local rData = reelData[i]
+        local itemFrame = Instance.new("Frame")
+        itemFrame.Name = "HammerItem_" .. i
+        itemFrame.Size = UDim2.new(0, 190, 0, 199)
+        itemFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+        local cardCenterX = (i - 1) * CARD_STEP
+        itemFrame.Position = UDim2.new(0, cardCenterX, 0.5, 0)
+        itemFrame.BackgroundTransparency = 1
+        itemFrame.BorderSizePixel = 0
+        itemFrame.ZIndex = 34
+        
+        -- Hammer Icon (140x140, floating directly in the slot)
+        local icon = Instance.new("ImageLabel")
+        icon.Name = "HammerIcon"
+        icon.Size = UDim2.new(0, 140, 0, 140)
+        icon.Position = UDim2.new(0.5, 0, 0, 14)
+        icon.AnchorPoint = Vector2.new(0.5, 0)
+        icon.BackgroundTransparency = 1
+        icon.ScaleType = Enum.ScaleType.Fit
+        local assetId = rData.AssetId
+        if not assetId or assetId == "" or PendingAssets[assetId] then
+            assetId = VERIFIED_BASE_HAMMER
         end
+        icon.Image = assetId
+        icon.ZIndex = 35
+        icon.Parent = itemFrame
         
-        local stepRarityName = reel[i] or targetRarity.Name
-        local r = GameConfig.HammerRarities[stepRarityName] or targetRarity
-        SetHammerVisual(r)
+        -- Damage Label: "+60 dmg" directly underneath the hammer (matching user's attached image)
+        local dmgLabel = Instance.new("TextLabel")
+        dmgLabel.Name = "DmgLabel"
+        dmgLabel.Size = UDim2.new(1, 0, 0, 26)
+        dmgLabel.Position = UDim2.new(0.5, 0, 1, -16)
+        dmgLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+        dmgLabel.BackgroundTransparency = 1
+        dmgLabel.Font = Enum.Font.FredokaOne
+        dmgLabel.TextSize = 22
+        dmgLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        dmgLabel.Text = string.format("+%d dmg", rData.DamagePercent or 30)
+        dmgLabel.TextXAlignment = Enum.TextXAlignment.Center
+        dmgLabel.TextStrokeTransparency = 0.5
+        dmgLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        dmgLabel.ZIndex = 36
+        dmgLabel.Parent = itemFrame
         
-        local tiltAngle = (i % 2 == 0) and 7 or -7
-        hammerIcon.Rotation = tiltAngle
-        
-        TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Size = UDim2.new(0, 235, 0, 235),
-            Position = UDim2.new(0.5, 0, 0, 132)
-        }):Play()
-        
-        task.wait(delay * 0.5)
-        
-        if (not IsActiveInRound()) or myToken ~= SessionToken then
-            rouletteContainer.Visible = false
-            IsRoulettePlaying = false
-            return
-        end
-        
-        TweenService:Create(hammerIcon, TweenInfo.new(delay * 0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-            Size = UDim2.new(0, 220, 0, 220),
-            Position = UDim2.new(0.5, 0, 0, 135)
-        }):Play()
-        
-        task.wait(delay * 0.5)
+        itemFrame.Parent = reelTrack
+        items[i] = {
+            frame = itemFrame,
+            icon = icon,
+            label = dmgLabel,
+            relX = cardCenterX
+        }
     end
+    
+    -- Slot alignment math:
+    -- ReelClipper is 566px wide -> center is X = 283 (which is exactly Middle Slot center!)
+    -- Card WIN_INDEX must finish exactly at center (283)
+    local targetCardCenter = (WIN_INDEX - 1) * CARD_STEP
+    local trackX_final = 283 - targetCardCenter
+    
+    -- LEFT-TO-RIGHT SPIN:
+    -- Cards travel towards the right (+X direction).
+    -- Start position is to the left (smaller X) and glides rightwards to trackX_final!
+    local travelDistance = SPIN_TRAVEL_CARDS * CARD_STEP
+    local trackX_start = trackX_final - travelDistance
+    
+    -- Real-time 3D Perspective & Opacity updater based on distance from center slot (X = 283)
+    -- Middle hammer: full crisp 1.0 scale (140px), 0.0 transparency, and "+XX dmg" text.
+    -- Side hammers: tapered 3D depth scaling (0.84 scale, 0.45 transparency in side slots).
+    -- Exiting hammers: shrink to 0.68 scale and fade out completely (dist >= 270 -> Visible = false).
+    local function updateOpacities(curTrackX)
+        for i = 1, TOTAL_CARDS do
+            local it = items[i]
+            local screenX = curTrackX + it.relX
+            local dist = math.abs(screenX - 283)
+            if dist >= 270 then
+                it.frame.Visible = false
+                it.icon.ImageTransparency = 1
+                it.label.TextTransparency = 1
+            else
+                it.frame.Visible = true
+                local currentScale = 1.0
+                if dist <= 40 then
+                    -- Solid center hammer: full size (140px)
+                    it.icon.ImageTransparency = 0
+                    currentScale = 1.0
+                elseif dist <= 190 then
+                    -- Smooth fade and 3D perspective depth towards side slots (1.0 -> 0.84 scale, 0.0 -> 0.45 transparency)
+                    local t = (dist - 40) / 150
+                    it.icon.ImageTransparency = t * 0.45
+                    currentScale = 1.0 - (t * 0.16)
+                else
+                    -- Exiting side slots: shrink to 0.68 scale, fade out to 1.0
+                    local t = (dist - 190) / 80
+                    it.icon.ImageTransparency = math.clamp(0.45 + t * 0.55, 0, 1)
+                    currentScale = math.clamp(0.84 - (t * 0.16), 0.68, 0.84)
+                end
+                
+                local iconSize = math.round(140 * currentScale)
+                local iconY = math.round(14 + (140 - iconSize) * 0.5)
+                it.icon.Size = UDim2.new(0, iconSize, 0, iconSize)
+                it.icon.Position = UDim2.new(0.5, 0, 0, iconY)
+                
+                -- Damage text "+60 dmg" is only displayed when centered in the middle slot
+                if dist <= 25 then
+                    it.label.TextTransparency = 0
+                    it.label.Visible = true
+                elseif dist <= 55 then
+                    it.label.TextTransparency = (dist - 25) / 30
+                    it.label.Visible = true
+                else
+                    it.label.TextTransparency = 1
+                    it.label.Visible = false
+                end
+            end
+        end
+    end
+    
+    -- Slot alignment math:
+    -- ReelClipper is 566px wide -> center is X = 283 (which is exactly Middle Slot center!)
+    -- Card WIN_INDEX finishes centered at X = 283
+    local targetCardCenter = (WIN_INDEX - 1) * CARD_STEP
+    local trackX_final = 283 - targetCardCenter
+    
+    -- LEFT-TO-RIGHT SPIN:
+    -- Cards travel towards the right (+X direction).
+    local travelDistance = SPIN_TRAVEL_CARDS * CARD_STEP
+    local trackX_start = trackX_final - travelDistance
+    -- Stage 1 Overshoot (+12px past center for peak suspense before recoil lock!)
+    local trackX_overshoot = trackX_final + 12
+    
+    -- Micro-kick on top and bottom pointer needles
+    local function kickNeedles()
+        if topPointer then
+            topPointer.Position = UDim2.new(0.5, 0, 0, -6)
+            TweenService:Create(topPointer, TweenInfo.new(0.08, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Position = UDim2.new(0.5, 0, 0, -3)
+            }):Play()
+        end
+        if bottomPointer then
+            bottomPointer.Position = UDim2.new(0.5, 0, 1, 6)
+            TweenService:Create(bottomPointer, TweenInfo.new(0.08, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Position = UDim2.new(0.5, 0, 1, 3)
+            }):Play()
+        end
+    end
+    
+    -- Pre-position and update opacities BEFORE making UI visible (ZERO GAP / NO PAUSE!)
+    reelTrack.Position = UDim2.new(0, math.round(trackX_start), 0, 0)
+    updateOpacities(trackX_start)
+    
+    -- STAGE 1: Fast Spin + Quart Deceleration to Overshoot (4.30s)
+    local spinProgress = Instance.new("NumberValue")
+    spinProgress.Value = 0
+    
+    local lastTickStep = -1
+    local progressConn = spinProgress.Changed:Connect(function(val)
+        if (not IsActiveInRound()) or myToken ~= SessionToken then return end
+        local curX = trackX_start + (trackX_overshoot - trackX_start) * val
+        reelTrack.Position = UDim2.new(0, math.round(curX), 0, 0)
+        updateOpacities(curX)
+        
+        -- Multi-pitch dynamic ticker audio + needle kick
+        local currentStep = math.floor((curX - trackX_start) / CARD_STEP)
+        if currentStep ~= lastTickStep and currentStep >= 0 then
+            lastTickStep = currentStep
+            kickNeedles()
+            
+            pcall(function()
+                local tickSound = Instance.new("Sound")
+                tickSound.SoundId = "rbxassetid://6895079853" -- Crisp mechanical click
+                local basePitch = 1.55 - (val * 0.70) -- Pitch slides down from 1.55 to 0.85
+                tickSound.PlaybackSpeed = math.clamp(basePitch, 0.85, 1.65)
+                tickSound.Volume = (val >= 0.85) and 0.40 or (0.16 + val * 0.14)
+                tickSound.Parent = SoundService
+                tickSound:Play()
+                Debris:AddItem(tickSound, 0.25)
+                
+                -- Layer heavier thud on final crawling hammers (intense suspense!)
+                if val >= 0.85 then
+                    local thud = Instance.new("Sound")
+                    thud.SoundId = "rbxasset://sounds/action_jump.mp3"
+                    thud.PlaybackSpeed = 0.82
+                    thud.Volume = 0.28
+                    thud.Parent = SoundService
+                    thud:Play()
+                    Debris:AddItem(thud, 0.3)
+                end
+            end)
+        end
+    end)
+    
+    -- Award-winning Quart deceleration curve
+    local spinTween1 = TweenService:Create(spinProgress, TweenInfo.new(4.30, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+        Value = 1
+    })
+    
+    -- Start spinning and reveal UI container simultaneously (ZERO GAP!)
+    spinTween1:Play()
+    rouletteContainer.Visible = true
+    
+    spinTween1.Completed:Wait()
+    progressConn:Disconnect()
+    spinProgress:Destroy()
     
     if (not IsActiveInRound()) or myToken ~= SessionToken then
         rouletteContainer.Visible = false
@@ -610,16 +966,38 @@ local function PlayHammerRoulette(targetRarity, totalDuration, spinnerReel)
         return
     end
     
-    -- Stop EXACTLY on the server-authoritative rarity with celebratory burst
-    SetHammerVisual(targetRarity)
-    hammerIcon.Rotation = 0
+    -- STAGE 2: Suspense Breath (0.06s) + Elastic Recoil Snap Lock (-12px back to center)
+    task.wait(0.06)
     
-    TweenService:Create(hammerIcon, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 270, 0, 270),
-        Position = UDim2.new(0.5, 0, 0, 135)
-    }):Play()
+    local recoilProgress = Instance.new("NumberValue")
+    recoilProgress.Value = 0
+    local recoilConn = recoilProgress.Changed:Connect(function(rVal)
+        if (not IsActiveInRound()) or myToken ~= SessionToken then return end
+        local rX = trackX_overshoot + (trackX_final - trackX_overshoot) * rVal
+        reelTrack.Position = UDim2.new(0, math.round(rX), 0, 0)
+        updateOpacities(rX)
+    end)
     
-    task.wait(1.5)
+    local recoilTween = TweenService:Create(recoilProgress, TweenInfo.new(0.38, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Value = 1
+    })
+    recoilTween:Play()
+    kickNeedles()
+    
+    -- Crisp mechanical lock click on recoil snap
+    pcall(function()
+        local lockSound = Instance.new("Sound")
+        lockSound.SoundId = "rbxassetid://6895079853"
+        lockSound.PlaybackSpeed = 1.05
+        lockSound.Volume = 0.55
+        lockSound.Parent = SoundService
+        lockSound:Play()
+        Debris:AddItem(lockSound, 0.3)
+    end)
+    
+    recoilTween.Completed:Wait()
+    recoilConn:Disconnect()
+    recoilProgress:Destroy()
     
     if (not IsActiveInRound()) or myToken ~= SessionToken then
         rouletteContainer.Visible = false
@@ -627,16 +1005,124 @@ local function PlayHammerRoulette(targetRarity, totalDuration, spinnerReel)
         return
     end
     
-    TweenService:Create(hammerIcon, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-        ImageTransparency = 1,
-        Size = UDim2.new(0, 180, 0, 180),
-        Position = UDim2.new(0.5, 0, 0, 135)
-    }):Play()
-    TweenService:Create(rarityTitle, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
-    TweenService:Create(damageTitle, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+    -- Perfect pixel lock on winning hammer
+    reelTrack.Position = UDim2.new(0, math.round(trackX_final), 0, 0)
+    updateOpacities(trackX_final)
     
-    task.wait(0.4)
+    -- GRAND VICTORY REVEAL & CELEBRATION (Blade Ball / Pet Simulator 99 AAA Juice)
+    local winningItem = items[WIN_INDEX]
+    local raySpinConn = nil
+    
+    -- 1. Rotating Golden Victory Sunburst Rays behind winning hammer
+    if sunburstRays then
+        sunburstRays.Visible = true
+        sunburstRays.ImageTransparency = 0.55
+        sunburstRays.Rotation = 0
+        raySpinConn = RunService.RenderStepped:Connect(function(dt)
+            sunburstRays.Rotation = (sunburstRays.Rotation + dt * 60) % 360
+        end)
+    end
+    
+    -- 2. Hammer Elastic Scale Punch & Playful Rotation Wiggle
+    if winningItem then
+        winningItem.icon.Size = UDim2.new(0, 168, 0, 168)
+        winningItem.icon.Position = UDim2.new(0.5, 0, 0, 0)
+        winningItem.icon.Rotation = -6
+        TweenService:Create(winningItem.icon, TweenInfo.new(0.40, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 148, 0, 148),
+            Position = UDim2.new(0.5, 0, 0, 10),
+            Rotation = 0
+        }):Play()
+        
+        -- Punch on "+XX dmg" text with radiant gold highlight
+        winningItem.label.TextSize = 27
+        winningItem.label.TextColor3 = Color3.fromRGB(255, 245, 180)
+        TweenService:Create(winningItem.label, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            TextSize = 22,
+            TextColor3 = Color3.fromRGB(255, 255, 255)
+        }):Play()
+    end
+    
+    -- 3. Center Slot Highlight Frame Neon Pulse
+    local targetGlowColor = targetRarity.GlowColor or targetRarity.Color or Color3.fromRGB(255, 220, 50)
+    if csStroke then
+        csStroke.Color = targetGlowColor
+        csStroke.Thickness = 4.5
+        TweenService:Create(csStroke, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Thickness = 2.5
+        }):Play()
+    end
+    
+    -- 4. Target Needles Gold Flare
+    if topPointer and bottomPointer then
+        topPointer.BackgroundColor3 = targetGlowColor
+        bottomPointer.BackgroundColor3 = targetGlowColor
+    end
+    
+    -- 5. Camera Impact & Level-Up Fanfare Audio
+    DoCameraShake(targetRarity.CameraShake or 1.1, 0.45)
+    pcall(function()
+        local winSound = Instance.new("Sound")
+        winSound.SoundId = "rbxasset://sounds/action_get_up.mp3"
+        winSound.PlaybackSpeed = 1.05
+        winSound.Volume = 0.85
+        winSound.Parent = SoundService
+        winSound:Play()
+        Debris:AddItem(winSound, 1.8)
+    end)
+    
+    -- Hold for 2.0 seconds so player admires their new weapon and damage
+    task.wait(2.0)
+    
+    if (not IsActiveInRound()) or myToken ~= SessionToken then
+        if raySpinConn then raySpinConn:Disconnect() end
+        if sunburstRays then sunburstRays.Visible = false end
+        rouletteContainer.Visible = false
+        IsRoulettePlaying = false
+        return
+    end
+    
+    -- Clean fade-out before next phase
+    local fadeTween = TweenService:Create(rouletteBg, TweenInfo.new(0.35), { ImageTransparency = 1 })
+    fadeTween:Play()
+    if csStroke then
+        TweenService:Create(csStroke, TweenInfo.new(0.35), { Transparency = 1 }):Play()
+    end
+    if topPointer and bottomPointer then
+        local tpSt = topPointer:FindFirstChildOfClass("UIStroke")
+        local bpSt = bottomPointer:FindFirstChildOfClass("UIStroke")
+        if tpSt then TweenService:Create(tpSt, TweenInfo.new(0.35), { Transparency = 1 }):Play() end
+        if bpSt then TweenService:Create(bpSt, TweenInfo.new(0.35), { Transparency = 1 }):Play() end
+    end
+    if sunburstRays then
+        TweenService:Create(sunburstRays, TweenInfo.new(0.35), { ImageTransparency = 1 }):Play()
+    end
+    if winningItem then
+        TweenService:Create(winningItem.icon, TweenInfo.new(0.35), { ImageTransparency = 1 }):Play()
+        TweenService:Create(winningItem.label, TweenInfo.new(0.35), { TextTransparency = 1 }):Play()
+    end
+    task.wait(0.35)
+    
+    if raySpinConn then raySpinConn:Disconnect() end
+    if sunburstRays then
+        sunburstRays.Visible = false
+        sunburstRays.ImageTransparency = 1
+    end
     rouletteContainer.Visible = false
+    rouletteBg.ImageTransparency = 0
+    if csStroke then
+        csStroke.Transparency = 0
+        csStroke.Thickness = 2.5
+        csStroke.Color = Color3.fromRGB(255, 255, 255)
+    end
+    if topPointer and bottomPointer then
+        topPointer.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+        bottomPointer.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+        local tpSt = topPointer:FindFirstChildOfClass("UIStroke")
+        local bpSt = bottomPointer:FindFirstChildOfClass("UIStroke")
+        if tpSt then tpSt.Transparency = 0 end
+        if bpSt then bpSt.Transparency = 0 end
+    end
     IsRoulettePlaying = false
 end
 
@@ -1144,8 +1630,8 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     local rowPadding = 5
     local tableContentHeight = rowCount * (rowHeight + rowPadding)
     
-    local desiredHeight = 132 + tableContentHeight + 12
-    local modalHeight = math.clamp(desiredHeight, 330, 615)
+    local desiredHeight = 102 + tableContentHeight + 14
+    local modalHeight = math.clamp(desiredHeight, 300, 580)
     
     local shadowFrame, cardFrame = ensureRankingsStructure()
     rankingsModal.Size = UDim2.new(0, 600, 0, modalHeight)
@@ -1258,10 +1744,10 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     headerFrame.Parent = cardFrame
     
     -- Scrolling Container with UIPadding so border strokes are never cut off by ClipsDescendants!
-    local isScrollable = (tableContentHeight > (modalHeight - 124))
+    local isScrollable = (tableContentHeight > (modalHeight - 100))
     local scroll = Instance.new("ScrollingFrame")
     scroll.Name = "LeaderboardScroll"
-    scroll.Size = UDim2.new(1, -32, 1, -126)
+    scroll.Size = UDim2.new(1, -32, 1, -98)
     scroll.Position = UDim2.new(0, 16, 0, 84)
     scroll.BackgroundTransparency = 1
     scroll.BorderSizePixel = 0
@@ -1393,7 +1879,7 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
         c2.Position = UDim2.new(0, 36, 0, 0)
         c2.BackgroundTransparency = 1
         if isMe then
-            c2.Text = string.format("%s ★ (YOU)", dispName)
+            c2.Text = string.format("%s (YOU)", dispName)
             c2.Font = Enum.Font.GothamBlack
             c2.TextSize = 13
             c2.TextColor3 = Color3.fromRGB(255, 235, 100)
@@ -1440,36 +1926,6 @@ RankingsRevealed.OnClientEvent:Connect(function(data)
     end
     
     scroll.Parent = cardFrame
-
-    -- Bottom Statement Capsule Pill
-    local footerPill = Instance.new("Frame")
-    footerPill.Name = "FooterStatement"
-    footerPill.Size = UDim2.new(0, 430, 0, 22)
-    footerPill.Position = UDim2.new(0.5, 0, 1, -10)
-    footerPill.AnchorPoint = Vector2.new(0.5, 1)
-    footerPill.BackgroundColor3 = Color3.fromRGB(22, 18, 17)
-    footerPill.BorderSizePixel = 0
-    footerPill.ZIndex = 29
-    local fpCorner = Instance.new("UICorner")
-    fpCorner.CornerRadius = UDim.new(0, 11)
-    fpCorner.Parent = footerPill
-    local fpStroke = Instance.new("UIStroke")
-    fpStroke.Color = Color3.fromRGB(0, 0, 0)
-    fpStroke.Thickness = 1.5
-    fpStroke.Parent = footerPill
-
-    local footerText = Instance.new("TextLabel")
-    footerText.Size = UDim2.new(1, 0, 1, 0)
-    footerText.BackgroundTransparency = 1
-    footerText.Text = "★ TOP 50% SURVIVE • LOWEST BIDS FACE THE HAMMER ★"
-    footerText.Font = Enum.Font.GothamBold
-    footerText.TextSize = 10.5
-    footerText.TextColor3 = Color3.fromRGB(255, 225, 130)
-    footerText.TextXAlignment = Enum.TextXAlignment.Center
-    footerText.TextYAlignment = Enum.TextYAlignment.Center
-    footerText.ZIndex = 30
-    footerText.Parent = footerPill
-    footerPill.Parent = cardFrame
 
     rankingsModal.Visible = true
     updateActionButtonsVisibility()
@@ -1936,10 +2392,10 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.F4 then
         showResultsUI({
-            Winner = player.DisplayName,
+            Winner = LocalPlayer.DisplayName,
             TotalDuration = 83,
             Podium = {
-                { Rank = 1, UserId = player.UserId, Name = player.Name, DisplayName = player.DisplayName, SurvivalTime = 83 },
+                { Rank = 1, UserId = LocalPlayer.UserId, Name = LocalPlayer.Name, DisplayName = LocalPlayer.DisplayName, SurvivalTime = 83 },
                 { Rank = 2, UserId = 1, Name = "RunnerUp", DisplayName = "RunnerUp", SurvivalTime = 72 },
                 { Rank = 3, UserId = 2, Name = "Contender", DisplayName = "Contender", SurvivalTime = 58 },
             }

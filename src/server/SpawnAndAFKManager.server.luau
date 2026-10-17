@@ -185,22 +185,19 @@ end
 
 ensureMudFoundations()
 
--- 4. Unified AFK Teleport & Attribute Handler
+-- 4. Unified AFK Attribute Handler (No immediate teleportation)
 local function handleAFKToggle(player: Player, isAFK: boolean?)
-	local currentAFK = player:GetAttribute("IsAFK") or false
-	local newAFK = (isAFK ~= nil) and isAFK or (not currentAFK)
-	player:SetAttribute("IsAFK", newAFK)
-
-	local character = player.Character
-	if character and newAFK then
-		-- Offset +3.5 studs up so players stand cleanly on solid floor beneath non-collidable spawn
-		character:PivotTo(primarySpawnCFrame * CFrame.new(0, 3.5, 0))
+	local newAFK: boolean
+	if isAFK ~= nil then
+		newAFK = (isAFK == true)
+	else
+		local currentAFK = (player:GetAttribute("IsAFK") == true)
+		newAFK = not currentAFK
 	end
+	player:SetAttribute("IsAFK", newAFK)
+	print(string.format("[SpawnAndAFKManager] %s set IsAFK = %s (no teleport)", player.Name, tostring(newAFK)))
 end
 
 AFKRemote.OnServerEvent:Connect(handleAFKToggle)
-if SetAFK then
-	SetAFK.OnServerEvent:Connect(handleAFKToggle)
-end
 
 print("[SpawnAndAFKManager] Initialized successfully.")

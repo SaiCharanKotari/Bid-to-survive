@@ -1,4 +1,5 @@
 --!strict
+--for now we are not using this code for agents are any one dont read this 
 -- Authoritative clean 90-frame motion data for Gorilla-gem Two-Handed Thor's Hammer Smash
 -- 30 FPS, 3.0 seconds total. Frame 40 (t=1.33s) is the exact ground slam impact.
 return {

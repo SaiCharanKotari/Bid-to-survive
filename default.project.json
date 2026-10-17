@@ -32,6 +32,12 @@
       },
       "R6AvatarManager": {
         "$path": "src/server/R6AvatarManager.server.luau"
+      },
+      "JetpackManager": {
+        "$path": "src/server/JetpackManager.server.luau"
+      },
+      "GlobalLeaderboardManager": {
+        "$path": "src/server/GlobalLeaderboardManager.server.luau"
       }
     },
 

@@ -337,7 +337,7 @@ function RuinsDoorHandManager.CalculateTargetDangerCircle(customPlayerData: any?
 
 	if customPlayerData and typeof(customPlayerData) == "table" then
 		for id, data in pairs(customPlayerData) do
-			if typeof(data) == "table" and data.IsAlive and not data.IsAFK and (data.ParticipationState == nil or data.ParticipationState == "Active") then
+			if typeof(data) == "table" and data.IsAlive and (data.ParticipationState == nil or data.ParticipationState == "Active") then
 				local char = data.Character
 				local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 				local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -363,7 +363,7 @@ function RuinsDoorHandManager.CalculateTargetDangerCircle(customPlayerData: any?
 
 	if #activeEntries == 0 then
 		for _, player in ipairs(Players:GetPlayers()) do
-			if not player:GetAttribute("IsAFK") then
+			if player:GetAttribute("IsInGame") == true then
 				local char = player.Character
 				local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 				local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -794,7 +794,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 		local participantsToCheck = {}
 		if customPlayerData and typeof(customPlayerData) == "table" then
 			for id, data in pairs(customPlayerData) do
-				if typeof(data) == "table" and data.IsAlive and not data.IsAFK then
+				if typeof(data) == "table" and data.IsAlive and (data.ParticipationState == nil or data.ParticipationState == "Active") then
 					local char = data.Character
 					local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 					local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -808,7 +808,7 @@ function RuinsDoorHandManager.ExecuteSequenceAndDamage(
 
 		if #participantsToCheck == 0 then
 			for _, player in ipairs(Players:GetPlayers()) do
-				if not player:GetAttribute("IsAFK") then
+				if player:GetAttribute("IsInGame") == true then
 					local char = player.Character
 					local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 					local hum = char and char:FindFirstChildOfClass("Humanoid")

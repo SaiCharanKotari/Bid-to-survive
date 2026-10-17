@@ -47,13 +47,11 @@ local function syncLeaderstats(player: Player)
 	end
 	cashStat.Value = player:GetAttribute("OverallCash") or 0
 
-	local walletStat = ls:FindFirstChild("Wallet") :: IntValue?
-	if not walletStat then
-		walletStat = Instance.new("IntValue")
-		walletStat.Name = "Wallet"
-		walletStat.Parent = ls
+	-- Ensure Wallet is removed from leaderstats (only Cash is visible on leaderboard)
+	local oldWallet = ls:FindFirstChild("Wallet")
+	if oldWallet then
+		oldWallet:Destroy()
 	end
-	walletStat.Value = player:GetAttribute("Wallet") or 0
 end
 
 local function setupPlayerEconomy(player: Player)
@@ -144,9 +142,9 @@ end
 -- ============================================================================
 function CashAndWalletManager.TrySpendFromWallet(player: Player, bidAmount: number): (boolean, number)
 	local currentWallet = player:GetAttribute("Wallet") or 0
-	local cleanBid = math.clamp(math.floor(bidAmount), 0, currentWallet)
+	local cleanBid = math.clamp(math.floor(bidAmount * 100) / 100, 0, currentWallet)
 
-	local newWallet = currentWallet - cleanBid
+	local newWallet = math.floor((currentWallet - cleanBid) * 100) / 100
 	player:SetAttribute("Wallet", newWallet)
 	player:SetAttribute("Money", newWallet)
 	player:SetAttribute("CurrentBid", cleanBid)

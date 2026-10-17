@@ -1,4 +1,5 @@
 --!strict
+--for now we are not using this code for agents are any one dont read this 
 -- GorillaSmashManager: Drives Gorilla-gem's authoritative 91-frame bone transform animation,
 -- synchronizes frame-accurate impact timing at Frame 40 (t=1.33s), executes hit-stop weight,
 -- triggers procedural VFX broadcast, and applies player damage.

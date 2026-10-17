@@ -1,14 +1,15 @@
 --!strict
 -- StarterPlayer/StarterPlayerScripts/MovementDiveAndHUDClient.client.luau
--- Authoritative client movement controller and unified status HUD for Bid-to-survive.
+-- Authoritative client movement controller, High-Speed Jetpack Burst, and unified status HUD for Bid-to-survive.
 -- Features:
 -- 1. Custom Walk (90697464892050) & Run (125757170550820)
--- 2. Spacebar Dive (137603926461078) with wall-checked forward raycasting and landed-bone projection (zero snap-back)
+-- 2. Spacebar Jetpack Burst (15 studs, blazing speed acceleration, pure white backside & thruster speed trails, upright posture)
 -- 3. Unified Stacked HUD (Money, HP, and Pure White Energy Bar)
 -- 4. Guaranteed Game-2 HP re-bind lifecycle
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
@@ -34,78 +35,58 @@ if not ClientLoadReadyEvent then
 	ClientLoadReadyEvent.Parent = Network or ReplicatedStorage
 end
 
+local JetpackBurstEvent: RemoteEvent? = (Network and Network:FindFirstChild("JetpackBurstEvent") :: RemoteEvent?)
+	or (ReplicatedStorage:FindFirstChild("JetpackBurstEvent") :: RemoteEvent?)
+
+local JetpackBurstReplicatedEvent: RemoteEvent? = (Network and Network:FindFirstChild("JetpackBurstReplicatedEvent") :: RemoteEvent?)
+	or (ReplicatedStorage:FindFirstChild("JetpackBurstReplicatedEvent") :: RemoteEvent?)
+
 -- ============================================================================
 -- 1. ANIMATION IDs & MOVEMENT TUNING
 -- ============================================================================
 -- R6 Custom Author Animations (Authored by sai_charank)
-local R6_WALK_ANIM_ID  = "rbxassetid://90697464892050"
-local R6_RUN_ANIM_ID   = "rbxassetid://125757170550820"
-local R6_DIVE_ANIM_ID  = "rbxassetid://137603926461078"
-local R6_GETUP_ANIM_ID = "rbxassetid://90005854469248"
+local R6_WALK_ANIM_ID = "rbxassetid://90697464892050"
+local R6_RUN_ANIM_ID  = "rbxassetid://125757170550820"
 
 -- R15 Compatible Animations (Used if avatar spawns as R15)
-local R15_WALK_ANIM_ID  = "rbxassetid://913402848"
-local R15_RUN_ANIM_ID   = "rbxassetid://913376220"
-local R15_DIVE_ANIM_ID  = "rbxassetid://507765000"
-local R15_GETUP_ANIM_ID = "rbxassetid://90005854469248"
+local R15_WALK_ANIM_ID = "rbxassetid://913402848"
+local R15_RUN_ANIM_ID  = "rbxassetid://913376220"
 
-local currentWalkAnimId  = R6_WALK_ANIM_ID
-local currentRunAnimId   = R6_RUN_ANIM_ID
-local currentDiveAnimId  = R6_DIVE_ANIM_ID
-local currentGetupAnimId = R6_GETUP_ANIM_ID
+local currentWalkAnimId = R6_WALK_ANIM_ID
+local currentRunAnimId  = R6_RUN_ANIM_ID
 
-local BASE_WALK_SPEED    = 14
-local SPRINT_WALK_SPEED  = 21
-local DIVE_FORWARD_SPEED = 32 -- Fallback speed if root motion is not available
-local DIVE_DURATION      = 0.68 -- Fallback duration if track length hasn't loaded
+local BASE_WALK_SPEED           = 14
+local SPRINT_WALK_SPEED         = 21
 
--- ============================================================================
--- DIVE TRAJECTORY & LANDING DISTANCE CONFIGURATION
--- During the dive roll, the animation plays naturally without displacement tampering.
--- In the exact millisecond the animation completes, the character lands forward at:
--- Total Distance = (DIVE_ANIMATION_BASE_DISTANCE * DIVE_FORWARD_SCALE) + DIVE_LANDING_FORWARD_OFFSET
--- ============================================================================
--- 1. DIVE_ANIMATION_BASE_DISTANCE: Base forward distance in studs authored in the animation
---    • Default: 12.0 studs (the natural travel of animation 137603926461078)
-local DIVE_ANIMATION_BASE_DISTANCE = 12.0
+-- High-Speed Jetpack Burst Tuning:
+-- Explodes speed forward to 85 studs/sec until exactly 15 studs traveled
+local JETPACK_BURST_DISTANCE    = 15.0
+local JETPACK_BURST_SPEED       = 85.0 -- High-speed acceleration feeling (4x sprint speed!)
+local JETPACK_COOLDOWN          = 1.25
+local JETPACK_ENERGY_COST       = 20
 
--- 2. DIVE_FORWARD_SCALE: Multiplier applied to the base animation distance
---    • 1.00 = 100% of authored animation distance (12.0 studs)
---    • Value Range: 0.50 (short 6 studs) to 1.50 (long 18 studs)
-local DIVE_FORWARD_SCALE = 1.00
+-- Sound verified in project assets (from DummyHammer)
+local JETPACK_BURST_SOUND_ID    = "rbxassetid://6241709963"
 
--- 3. DIVE_LANDING_FORWARD_OFFSET: Direct forward snap adjustment applied at the landing moment (in studs)
---    • 0.0 = Lands precisely where the animation roll touched down (12.0 studs total, zero visual pop)
---    • Value Range: -6.0 to +12.0 studs (tune to adjust final resting spot)
-local DIVE_LANDING_FORWARD_OFFSET = 0.0
-
--- 4. DIVE_GETUP_DURATION: Duration in seconds to play the standing/getup animation (0.18s)
-local DIVE_GETUP_DURATION = 0.18
-
--- 5. DIVE_LANDING_DELAY: Additional ground recovery time in seconds (0.0 = instant standing like normal)
-local DIVE_LANDING_DELAY = 0.0
-
--- Energy Settings (White Bar)
+-- Energy Settings (White / Cyan EP Bar)
 local MAX_ENERGY        = 100
 local SPRINT_DRAIN_RATE = 18 -- Energy drained per second while running
-local DIVE_ENERGY_COST  = 20 -- Burst energy consumed on Spacebar Dive
 local ENERGY_REGEN_RATE = 18 -- Energy regenerated per second when walking/idle
 
-local currentEnergy = MAX_ENERGY
-local isHoldingShift = false
-local isSprinting = false
-local isDiving = false
-local exhaustedLockout = false
+local currentEnergy     = MAX_ENERGY
+local isHoldingShift    = false
+local isSprinting       = false
+local isBursting        = false
+local lastBurstTime     = 0
+local exhaustedLockout  = false
 local lastMovementState = "None"
 
 -- Active Character References
-local activeChar: Model? = nil
-local activeHum: Humanoid? = nil
-local activeHRP: BasePart? = nil
+local activeChar: Model?        = nil
+local activeHum: Humanoid?      = nil
+local activeHRP: BasePart?       = nil
 local walkTrack: AnimationTrack? = nil
-local runTrack: AnimationTrack? = nil
-local diveTrack: AnimationTrack? = nil
-local getupTrack: AnimationTrack? = nil
+local runTrack: AnimationTrack?  = nil
 local healthConn: RBXScriptConnection? = nil
 
 -- ============================================================================
@@ -124,21 +105,18 @@ local function createOrUpdateStatusHUD()
 	screenGui.IgnoreGuiInset = true
 	screenGui.Parent = playerGui
 
-	-- ========================================================================
-	-- COMIC POP-ART STATUS STACK: Lifetime Cash, HP (Red), and EP (Cyan)
-	-- Slightly reduced dimensions (width: 315px, height: 44px, text: 19px)
-	-- ========================================================================
+	-- COMIC POP-ART STATUS STACK: Lifetime Cash, HP (Red), and EP (Cyan) - Sleek & Compact
 	local statusStack = Instance.new("Frame")
 	statusStack.Name = "BottomLeftStatusStack"
 	statusStack.AnchorPoint = Vector2.new(0, 1)
 	statusStack.Position = UDim2.new(0, 24, 1, -24)
-	statusStack.Size = UDim2.new(0, 315, 0, 134)
+	statusStack.Size = UDim2.new(0, 240, 0, 106)
 	statusStack.BackgroundTransparency = 1
 	statusStack.Parent = screenGui
 
 	local listLayout = Instance.new("UIListLayout")
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	listLayout.Padding = UDim.new(0, 8)
+	listLayout.Padding = UDim.new(0, 5)
 	listLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
 	listLayout.Parent = statusStack
 
@@ -146,7 +124,7 @@ local function createOrUpdateStatusHUD()
 		local bg = Instance.new("Frame")
 		bg.Name = name .. "Frame"
 		bg.LayoutOrder = order
-		bg.Size = UDim2.new(1, 0, 0, 44)
+		bg.Size = UDim2.new(1, 0, 0, 34)
 		bg.BackgroundColor3 = underlayColor
 		bg.BorderSizePixel = 0
 		bg.Parent = statusStack
@@ -157,7 +135,7 @@ local function createOrUpdateStatusHUD()
 
 		local stroke = Instance.new("UIStroke")
 		stroke.Color = Color3.fromRGB(0, 0, 0)
-		stroke.Thickness = 3
+		stroke.Thickness = 2
 		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		stroke.Parent = bg
 
@@ -175,12 +153,12 @@ local function createOrUpdateStatusHUD()
 		-- Left Label (e.g. "HP" or "EP")
 		local tagLabel = Instance.new("TextLabel")
 		tagLabel.Name = "TagLabel"
-		tagLabel.Size = UDim2.new(0, 44, 1, 0)
-		tagLabel.Position = UDim2.new(0, 12, 0.5, 0)
+		tagLabel.Size = UDim2.new(0, 36, 1, 0)
+		tagLabel.Position = UDim2.new(0, 10, 0.5, 0)
 		tagLabel.AnchorPoint = Vector2.new(0, 0.5)
 		tagLabel.BackgroundTransparency = 1
 		tagLabel.Font = Enum.Font.GothamBlack
-		tagLabel.TextSize = 19
+		tagLabel.TextSize = 14
 		tagLabel.TextXAlignment = Enum.TextXAlignment.Left
 		tagLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 		tagLabel.Text = tagText
@@ -188,19 +166,19 @@ local function createOrUpdateStatusHUD()
 		tagLabel.Parent = bg
 
 		local tagStroke = Instance.new("UIStroke")
-		tagStroke.Thickness = 2.5
+		tagStroke.Thickness = 2
 		tagStroke.Color = Color3.fromRGB(0, 0, 0)
 		tagStroke.Parent = tagLabel
 
 		-- Right Numeric Value Label (e.g. "100")
 		local valLabel = Instance.new("TextLabel")
 		valLabel.Name = "ValueLabel"
-		valLabel.Size = UDim2.new(0, 75, 1, 0)
-		valLabel.Position = UDim2.new(1, -12, 0.5, 0)
+		valLabel.Size = UDim2.new(0, 56, 1, 0)
+		valLabel.Position = UDim2.new(1, -10, 0.5, 0)
 		valLabel.AnchorPoint = Vector2.new(1, 0.5)
 		valLabel.BackgroundTransparency = 1
 		valLabel.Font = Enum.Font.GothamBlack
-		valLabel.TextSize = 19
+		valLabel.TextSize = 14
 		valLabel.TextXAlignment = Enum.TextXAlignment.Right
 		valLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 		valLabel.Text = "100"
@@ -208,29 +186,29 @@ local function createOrUpdateStatusHUD()
 		valLabel.Parent = bg
 
 		local valStroke = Instance.new("UIStroke")
-		valStroke.Thickness = 2.5
+		valStroke.Thickness = 2
 		valStroke.Color = Color3.fromRGB(0, 0, 0)
 		valStroke.Parent = valLabel
 
 		return bg, fill, valLabel
 	end
 
-	-- Red HP Bar (#FF0000 with 3px black stroke, white HP & number)
+	-- Red HP Bar (#FF0000 with 2px black stroke, white HP & number)
 	local hpBg, hpFill, hpLabel = createComicBar(2, "HP", "HP", Color3.fromRGB(255, 0, 0), Color3.fromRGB(60, 10, 15))
-	-- Cyan EP Bar (#00FFF2 with 3px black stroke, white EP & number)
+	-- Cyan EP Bar (#00FFF2 with 2px black stroke, white EP & number)
 	local _, energyFill, energyLabel = createComicBar(3, "Energy", "EP", Color3.fromRGB(0, 255, 242), Color3.fromRGB(10, 45, 50))
 
 	-- Comic Green Lifetime Cash Frame (+0 $) with "CASH" badge
 	local moneyFrame = Instance.new("Frame")
 	moneyFrame.Name = "LifetimeCashFrame"
 	moneyFrame.LayoutOrder = 1
-	moneyFrame.Size = UDim2.new(1, 0, 0, 30)
+	moneyFrame.Size = UDim2.new(1, 0, 0, 24)
 	moneyFrame.BackgroundTransparency = 1
 	moneyFrame.Parent = statusStack
 
 	local cashBadge = Instance.new("Frame")
 	cashBadge.Name = "CashBadge"
-	cashBadge.Size = UDim2.new(0, 52, 0, 22)
+	cashBadge.Size = UDim2.new(0, 44, 0, 18)
 	cashBadge.Position = UDim2.new(0, 0, 0.5, 0)
 	cashBadge.AnchorPoint = Vector2.new(0, 0.5)
 	cashBadge.BackgroundColor3 = Color3.fromRGB(0, 204, 0)
@@ -252,27 +230,27 @@ local function createOrUpdateStatusHUD()
 	badgeLabel.Size = UDim2.new(1, 0, 1, 0)
 	badgeLabel.BackgroundTransparency = 1
 	badgeLabel.Font = Enum.Font.GothamBlack
-	badgeLabel.TextSize = 12
+	badgeLabel.TextSize = 10
 	badgeLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
 	badgeLabel.Text = "CASH"
 	badgeLabel.Parent = cashBadge
 
 	local lifetimeCashLabel = Instance.new("TextLabel")
 	lifetimeCashLabel.Name = "LifetimeCashLabel"
-	lifetimeCashLabel.Size = UDim2.new(1, -60, 1, 0)
-	lifetimeCashLabel.Position = UDim2.new(0, 60, 0.5, 0)
+	lifetimeCashLabel.Size = UDim2.new(1, -52, 1, 0)
+	lifetimeCashLabel.Position = UDim2.new(0, 52, 0.5, 0)
 	lifetimeCashLabel.AnchorPoint = Vector2.new(0, 0.5)
 	lifetimeCashLabel.BackgroundTransparency = 1
 	lifetimeCashLabel.Font = Enum.Font.GothamBlack
-	lifetimeCashLabel.TextSize = 24
+	lifetimeCashLabel.TextSize = 18
 	lifetimeCashLabel.TextXAlignment = Enum.TextXAlignment.Left
-	lifetimeCashLabel.TextColor3 = Color3.fromRGB(0, 230, 0) -- Lime green #00E600
+	lifetimeCashLabel.TextColor3 = Color3.fromRGB(0, 230, 0)
 	lifetimeCashLabel.Text = "+0 $"
 	lifetimeCashLabel.ZIndex = 3
 	lifetimeCashLabel.Parent = moneyFrame
 
 	local moneyStroke = Instance.new("UIStroke")
-	moneyStroke.Thickness = 3
+	moneyStroke.Thickness = 2
 	moneyStroke.Color = Color3.fromRGB(0, 0, 0)
 	moneyStroke.Parent = lifetimeCashLabel
 
@@ -295,10 +273,7 @@ local function createOrUpdateStatusHUD()
 	payoutToast.Text = ""
 	payoutToast.Parent = moneyFrame
 
-	-- ========================================================================
-	-- BOTTOM-RIGHT WALLET CARD: "WALLET" badge + current playable session funds ($20.00)
-	-- Mirrored against bottom-left status stack, non-overlapping, comic style
-	-- ========================================================================
+	-- BOTTOM-RIGHT WALLET CARD
 	local walletCard = Instance.new("Frame")
 	walletCard.Name = "BottomRightWalletCard"
 	walletCard.AnchorPoint = Vector2.new(1, 1)
@@ -324,7 +299,7 @@ local function createOrUpdateStatusHUD()
 	walletBadge.Size = UDim2.new(0, 68, 0, 26)
 	walletBadge.Position = UDim2.new(0, 9, 0.5, 0)
 	walletBadge.AnchorPoint = Vector2.new(0, 0.5)
-	walletBadge.BackgroundColor3 = Color3.fromRGB(255, 185, 0) -- Bold comic gold/yellow
+	walletBadge.BackgroundColor3 = Color3.fromRGB(255, 185, 0)
 	walletBadge.BorderSizePixel = 0
 	walletBadge.Parent = walletCard
 
@@ -436,17 +411,14 @@ local function updateCurrencyUI()
 	local overallCash = player:GetAttribute("OverallCash") or 0
 	local matchWallet = player:GetAttribute("Wallet") or 20
 
-	-- Manage status stack sizing based on in-game state
 	hpBg.Visible = isInGame
 	statusStack.Size = isInGame and UDim2.new(0, 315, 0, 134) or UDim2.new(0, 315, 0, 82)
 
-	-- 1. LEFT DISPLAY: Always authoritative Lifetime Cash
 	if countUpThread == nil then
 		displayedOverallCash = overallCash
 		lifetimeCashLabel.Text = string.format("+%d $", math.floor(overallCash))
 	end
 
-	-- 2. RIGHT DISPLAY: Current session Wallet
 	if matchWallet ~= lastWalletVal then
 		if matchWallet < lastWalletVal then
 			animateWalletScalePunch()
@@ -456,7 +428,6 @@ local function updateCurrencyUI()
 	walletValLabel.Text = string.format("$%.2f", matchWallet)
 end
 
--- Backward compatibility alias
 local function updateMoneyDisplay()
 	updateCurrencyUI()
 end
@@ -520,7 +491,7 @@ end
 -- 3. CUSTOM WALK & RUN ANIMATION CONTROLLER
 -- ============================================================================
 local function syncMovementTracks()
-	if not activeHum or activeHum.Health <= 0 or isDiving then return end
+	if not activeHum or activeHum.Health <= 0 or isBursting then return end
 
 	local isMoving = activeHum.MoveDirection.Magnitude > 0.05
 	local wantSprint = isHoldingShift and isMoving and (not exhaustedLockout) and (currentEnergy > 0)
@@ -556,10 +527,9 @@ local function syncMovementTracks()
 	elseif wantSprint then
 		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.12) end
 		if runTrack and not runTrack.IsPlaying then runTrack:Play(0.12, 1, 1.0) end
-		-- Suppress default Animate movement tracks so custom sprint animation displays without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= runTrack and tr ~= diveTrack and tr ~= walkTrack and tr ~= getupTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
+				if tr ~= runTrack and tr ~= walkTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
 					tr:Stop(0.1)
 				end
 			end
@@ -567,10 +537,9 @@ local function syncMovementTracks()
 	else
 		if runTrack and runTrack.IsPlaying then runTrack:Stop(0.12) end
 		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play(0.12, 1, 1.0) end
-		-- Suppress default Animate movement tracks so custom walk animation displays without interference
 		if activeHum then
 			for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-				if tr ~= walkTrack and tr ~= diveTrack and tr ~= runTrack and tr ~= getupTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
+				if tr ~= walkTrack and tr ~= runTrack and (tr.Priority == Enum.AnimationPriority.Movement or tr.Priority == Enum.AnimationPriority.Core) then
 					tr:Stop(0.1)
 				end
 			end
@@ -579,192 +548,330 @@ local function syncMovementTracks()
 end
 
 -- ============================================================================
--- 4. SPACEBAR DIVE WITH FORWARD LANDING CALCULATION (NO SNAP-BACK!)
+-- 4. POLISHED PURE-WHITE JETPACK BACKSIDE SPEED TRAILS & VISUAL EFFECTS
 -- ============================================================================
-local function performRunningDive()
-	if isDiving or not activeChar or not activeHum or not activeHRP then return end
-	if activeHum.Health <= 0 or currentEnergy < 10 then return end
+local function emitJetpackVisuals(character: Model, duration: number, isLocal: boolean)
+	local jetpack = character:FindFirstChild("Jetpack")
+	if not jetpack then return end
 
-	-- Lock dive direction along the player's current movement / look direction
-	local moveDir = activeHum.MoveDirection
-	local flatDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-	if flatDir.Magnitude < 0.1 then
-		local look = activeHRP.CFrame.LookVector
-		flatDir = Vector3.new(look.X, 0, look.Z)
-	end
-	flatDir = flatDir.Unit
+	local handle = jetpack:FindFirstChild("Handle") :: BasePart?
+	local nozzles: { Attachment } = {}
 
-	isDiving = true
-	currentEnergy = math.max(0, currentEnergy - DIVE_ENERGY_COST)
-
-	local startPos = activeHRP.Position
-	print(string.format("[Movement][Dive] 🏊 Running dive initiated! StartPos: (%.2f, %.2f, %.2f), Dir: (%.2f, 0, %.2f), Energy: %d%%",
-		startPos.X, startPos.Y, startPos.Z, flatDir.X, flatDir.Z, math.floor(currentEnergy)))
-
-	-- Stop normal jump so pressing Space while running triggers Dive instead of jumping
-	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-
-	if walkTrack and walkTrack.IsPlaying then walkTrack:Stop(0.1) end
-	if runTrack and runTrack.IsPlaying then runTrack:Stop(0.1) end
-
-	-- Face character cleanly in the dive direction
-	activeHRP.CFrame = CFrame.lookAt(activeHRP.Position, activeHRP.Position + flatDir)
-
-	-- Motion Design: Aerodynamic pure white motion trail during dive roll
-	local trailAtt0 = Instance.new("Attachment")
-	trailAtt0.Name = "DiveTrailAtt0"
-	trailAtt0.Position = Vector3.new(0, 1.1, 0)
-	trailAtt0.Parent = activeHRP
-
-	local trailAtt1 = Instance.new("Attachment")
-	trailAtt1.Name = "DiveTrailAtt1"
-	trailAtt1.Position = Vector3.new(0, -1.1, 0)
-	trailAtt1.Parent = activeHRP
-
-	local diveTrail = Instance.new("Trail")
-	diveTrail.Name = "DiveMotionTrail"
-	diveTrail.Attachment0 = trailAtt0
-	diveTrail.Attachment1 = trailAtt1
-	diveTrail.FaceCamera = true
-	diveTrail.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
-	diveTrail.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.25),
-		NumberSequenceKeypoint.new(1, 1.0),
-	})
-	diveTrail.Lifetime = 0.25
-	diveTrail.LightEmission = 0.85
-	diveTrail.LightInfluence = 0.1
-	diveTrail.WidthScale = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1.0),
-		NumberSequenceKeypoint.new(1, 0.2),
-	})
-	diveTrail.Parent = activeHRP
-
-	local torso = activeChar:FindFirstChild("Torso") or activeChar:FindFirstChild("UpperTorso")
-	local head = activeChar:FindFirstChild("Head")
-
-	-- 1. Disable Torso and Head CanCollide during roll so rotating body parts never snag on floor
-	if torso and torso:IsA("BasePart") then torso.CanCollide = false end
-	if head and head:IsA("BasePart") then head.CanCollide = false end
-
-	-- Locate RootJoint (Torso.RootJoint for R6, LowerTorso.Root for R15)
-	local rootJoint = nil
-	if torso then
-		rootJoint = torso:FindFirstChild("RootJoint") or torso:FindFirstChild("Root")
-	end
-	if not rootJoint and activeChar:FindFirstChild("LowerTorso") then
-		local lt = activeChar.LowerTorso
-		rootJoint = lt:FindFirstChild("Root") or lt:FindFirstChild("RootJoint")
-	end
-
-	local diveDuration = 0.428
-	if diveTrack then
-		diveTrack:Play(0.04, 1, 1.0)
-		if diveTrack.Length and diveTrack.Length > 0.05 then
-			diveDuration = diveTrack.Length
+	for _, desc in ipairs(jetpack:GetDescendants()) do
+		if desc:IsA("Attachment") and (desc.Name == "LeftNozzle" or desc.Name == "RightNozzle" or string.find(desc.Name, "Nozzle")) then
+			table.insert(nozzles, desc)
 		end
-		print(string.format("[Movement][Dive] 🎬 DiveTrack playing (Length: %.2fs, Priority: %s)", diveDuration, diveTrack.Priority.Name))
 	end
 
-	local rayParams = RaycastParams.new()
-	rayParams.FilterDescendantsInstances = { activeChar }
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-
-	-- STEP 1: Let the dive animation play completely without per-frame displacement tampering
-	-- Yield until the exact moment the forward dive roll finishes (right before Animator's auto fade-out)
-	local diveStartTime = os.clock()
-	local targetDuration = math.max(0.05, diveDuration - 0.02)
-	while (os.clock() - diveStartTime) < targetDuration do
-		task.wait(0.015)
-		if not activeHRP or not activeHum or activeHum.Health <= 0 then break end
-	end
-
-	-- STEP 2: In the exact millisecond the animation completes, calculate and apply landing forward distance!
-	-- Formula: (DIVE_ANIMATION_BASE_DISTANCE * DIVE_FORWARD_SCALE) + DIVE_LANDING_FORWARD_OFFSET
-	local totalLandingDistance = (DIVE_ANIMATION_BASE_DISTANCE * DIVE_FORWARD_SCALE) + DIVE_LANDING_FORWARD_OFFSET
-
-	-- Wall collision safety check: prevent passing through walls/obstacles
-	local wallRay = Workspace:Raycast(startPos, flatDir * (totalLandingDistance + 1.2), rayParams)
-	if wallRay then
-		totalLandingDistance = math.max(0, wallRay.Distance - 1.2)
-	end
-
-	local targetPos = startPos + (flatDir * totalLandingDistance)
-
-	-- Floor snap raycast: ensure character lands solidly on the ground
-	local floorRay = Workspace:Raycast(targetPos + Vector3.new(0, 3, 0), Vector3.new(0, -8, 0), rayParams)
-	local hipHeight = (activeHum.RigType == Enum.HumanoidRigType.R6) and 2.8 or (activeHum.HipHeight + activeHRP.Size.Y * 0.5)
-	local targetY = floorRay and (floorRay.Position.Y + hipHeight) or targetPos.Y
-
-	local landingPos = Vector3.new(targetPos.X, targetY, targetPos.Z)
-	activeHRP.CFrame = CFrame.lookAt(landingPos, landingPos + flatDir)
-	activeHRP.AssemblyLinearVelocity = Vector3.zero
-
-	-- STEP 3: STOP DIVE ANIMATION & PLAY NEW STANDING/GETUP ANIMATION (90005854469248 for 0.18s)
-	-- 1. Stop dive animation track immediately with 0s fade
-	if diveTrack then
-		diveTrack:Stop(0)
-		pcall(function()
-			diveTrack:AdjustWeight(0, 0)
-		end)
-	end
-
-	-- 2. Stop any lingering Action tracks that might interfere
-	if activeHum then
-		for _, tr in ipairs(activeHum:GetPlayingAnimationTracks()) do
-			if tr ~= walkTrack and tr ~= runTrack and tr ~= getupTrack and (tr.Priority == Enum.AnimationPriority.Action or tr.Priority == Enum.AnimationPriority.Action4) then
-				tr:Stop(0)
+	if #nozzles == 0 then
+		for _, child in ipairs(jetpack:GetChildren()) do
+			if child:IsA("MeshPart") then
+				local att = Instance.new("Attachment")
+				att.Name = "DynamicNozzle"
+				att.Position = Vector3.new(0, -child.Size.Y / 2, 0)
+				att.Parent = child
+				table.insert(nozzles, att)
 			end
 		end
 	end
 
-	-- 3. Play the getup / standing animation (90005854469248) scaled for exactly 0.18s
-	if getupTrack then
-		local getupSpeed = (getupTrack.Length and getupTrack.Length > 0.05) and (getupTrack.Length / DIVE_GETUP_DURATION) or (0.30 / DIVE_GETUP_DURATION)
-		getupTrack:Play(0.02, 1, getupSpeed)
-		print(string.format("[Movement][Dive] 🧍 Playing getup animation (ID: %s, Length: %.2fs, Duration: %.2fs, Speed: %.2fx)",
-			currentGetupAnimId, getupTrack.Length or 0.30, DIVE_GETUP_DURATION, getupSpeed))
+	local cleanups: { Instance } = {}
+
+	-- 1. GLORIOUS PURE-WHITE BACKSIDE SPEED TRAIL (Centered on Jetpack Handle)
+	-- Attached with 1.8 studs of vertical height so it is 100% visible from behind in 3rd person!
+	if handle then
+		local attTop = Instance.new("Attachment")
+		attTop.Name = "BackTrailTop"
+		attTop.Position = Vector3.new(0, 0.85, 0.45)
+		attTop.Parent = handle
+
+		local attBottom = Instance.new("Attachment")
+		attBottom.Name = "BackTrailBottom"
+		attBottom.Position = Vector3.new(0, -0.85, 0.45)
+		attBottom.Parent = handle
+
+		local backTrail = Instance.new("Trail")
+		backTrail.Name = "JetpackBackSpeedTrail"
+		backTrail.Attachment0 = attTop
+		backTrail.Attachment1 = attBottom
+		backTrail.FaceCamera = true
+		backTrail.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+		backTrail.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.05),
+			NumberSequenceKeypoint.new(0.65, 0.35),
+			NumberSequenceKeypoint.new(1, 1.0),
+		})
+		backTrail.Lifetime = 0.32
+		backTrail.LightEmission = 1.0
+		backTrail.LightInfluence = 0
+		backTrail.WidthScale = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1.0),
+			NumberSequenceKeypoint.new(1, 0.15),
+		})
+		backTrail.Parent = handle
+		table.insert(cleanups, backTrail)
+		table.insert(cleanups, attTop)
+		table.insert(cleanups, attBottom)
 	end
 
-	print(string.format("[Movement][Dive] 🛬 Animation ended! Placed in results area: (%.2f, %.2f, %.2f), TotalTravel: %.2f studs (Base: %.1f, Scale: %.2fx, Offset: %.1f)",
-		landingPos.X, landingPos.Y, landingPos.Z, totalLandingDistance, DIVE_ANIMATION_BASE_DISTANCE, DIVE_FORWARD_SCALE, DIVE_LANDING_FORWARD_OFFSET))
+	-- 2. DUAL THRUSTER NOZZLE PARTICLES & STREAMING ENGINE TRAILS
+	for _, nozzle in ipairs(nozzles) do
+		-- Dense pure-white exhaust burst
+		local emitter = Instance.new("ParticleEmitter")
+		emitter.Name = "ThrusterExhaust"
+		emitter.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+		emitter.LightEmission = 1.0
+		emitter.LightInfluence = 0
+		emitter.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.60),
+			NumberSequenceKeypoint.new(1, 0.10),
+		})
+		emitter.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.05),
+			NumberSequenceKeypoint.new(0.5, 0.3),
+			NumberSequenceKeypoint.new(1, 1.0),
+		})
+		emitter.Lifetime = NumberRange.new(0.15, 0.22)
+		emitter.Speed = NumberRange.new(14, 22)
+		emitter.SpreadAngle = Vector2.new(8, 8)
+		emitter.EmissionDirection = Enum.NormalId.Bottom
+		emitter.Rate = 120
+		emitter.Parent = nozzle
+		table.insert(cleanups, emitter)
 
-	-- Restore collision
-	if torso and torso:IsA("BasePart") then torso.CanCollide = true end
-	if head and head:IsA("BasePart") then head.CanCollide = true end
+		-- Individual engine ribbons streaming backwards
+		if nozzle.Parent and nozzle.Parent:IsA("BasePart") then
+			local nAtt0 = Instance.new("Attachment")
+			nAtt0.Name = "NozzleTrail0"
+			nAtt0.Position = Vector3.new(0, 0.3, 0)
+			nAtt0.Parent = nozzle.Parent
 
-	-- Clean up motion trail
-	diveTrail.Enabled = false
-	Debris:AddItem(diveTrail, 0.3)
-	Debris:AddItem(trailAtt0, 0.3)
-	Debris:AddItem(trailAtt1, 0.3)
+			local nAtt1 = Instance.new("Attachment")
+			nAtt1.Name = "NozzleTrail1"
+			nAtt1.Position = Vector3.new(0, -0.3, 0)
+			nAtt1.Parent = nozzle.Parent
 
-	-- Wait for the 0.18s getup animation to finish rising into full standing posture
-	if DIVE_GETUP_DURATION > 0 then
-		task.wait(DIVE_GETUP_DURATION)
-	end
-
-	-- Ground recovery delay: only wait if user configured an additional delay > 0
-	if DIVE_LANDING_DELAY > 0 then
-		if activeHum and activeHum.Health > 0 then
-			activeHum.WalkSpeed = 6
+			local nTrail = Instance.new("Trail")
+			nTrail.Name = "NozzleStreamTrail"
+			nTrail.Attachment0 = nAtt0
+			nTrail.Attachment1 = nAtt1
+			nTrail.FaceCamera = true
+			nTrail.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+			nTrail.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.10),
+				NumberSequenceKeypoint.new(0.7, 0.40),
+				NumberSequenceKeypoint.new(1, 1.0),
+			})
+			nTrail.Lifetime = 0.25
+			nTrail.LightEmission = 1.0
+			nTrail.LightInfluence = 0
+			nTrail.WidthScale = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.8),
+				NumberSequenceKeypoint.new(1, 0.1),
+			})
+			nTrail.Parent = nozzle.Parent
+			table.insert(cleanups, nTrail)
+			table.insert(cleanups, nAtt0)
+			table.insert(cleanups, nAtt1)
 		end
-		task.wait(DIVE_LANDING_DELAY)
 	end
 
-	local finalPos = activeHRP and activeHRP.Position or Vector3.zero
-	local landingToFinalDiff = (finalPos - landingPos).Magnitude
-	print(string.format("[Movement][Dive] 🧍 Getup complete! FinalPos: (%.2f, %.2f, %.2f), Landing-to-Final Diff: %.4f studs (Clean Normal Standing!)",
-		finalPos.X, finalPos.Y, finalPos.Z, landingToFinalDiff))
+	-- 3. Local Camera FOV Punch (+6 degrees) & Audio
+	if isLocal then
+		local sound = Instance.new("Sound")
+		sound.SoundId = JETPACK_BURST_SOUND_ID
+		sound.Volume = 0.45
+		sound.PlaybackSpeed = 1.35
+		sound.Parent = handle or character
+		sound:Play()
+		Debris:AddItem(sound, 1.0)
 
-	activeHum:ChangeState(Enum.HumanoidStateType.Running)
-	activeHum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-	isDiving = false
+		if camera then
+			local curFOV = camera.FieldOfView
+			local burstFOV = math.min(100, curFOV + 6)
+			TweenService:Create(camera, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				FieldOfView = burstFOV
+			}):Play()
+		end
+	end
+
+	-- Safe cleanup after burst duration
+	task.delay(duration, function()
+		for _, inst in ipairs(cleanups) do
+			if inst:IsA("ParticleEmitter") then
+				inst.Enabled = false
+				Debris:AddItem(inst, 0.3)
+			elseif inst:IsA("Trail") then
+				inst.Enabled = false
+				Debris:AddItem(inst, 0.3)
+			else
+				Debris:AddItem(inst, 0.3)
+			end
+		end
+
+		if isLocal and camera then
+			local targetBaselineFOV = isSprinting and 77 or 70
+			TweenService:Create(camera, TweenInfo.new(0.20, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				FieldOfView = targetBaselineFOV
+			}):Play()
+		end
+	end)
+end
+
+-- Ultra-Responsive Check: whether Shift + Movement + Space conditions are satisfied
+local function canPerformBurst(): boolean
+	if isBursting then return false end
+	if not activeChar or not activeHum or not activeHRP then return false end
+	if activeHum.Health <= 0 then return false end
+	if player:GetAttribute("IsAFK") == true and player:GetAttribute("IsInGame") ~= true then return false end
+	if exhaustedLockout or currentEnergy < JETPACK_ENERGY_COST then return false end
+	if (os.clock() - lastBurstTime) < JETPACK_COOLDOWN then return false end
+
+	-- Check if player is holding Shift (or sprinting) AND moving
+	local hasShift = isHoldingShift
+		or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+		or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+
+	local isMoving = (activeHum.MoveDirection.Magnitude > 0.05)
+		or UserInputService:IsKeyDown(Enum.KeyCode.W)
+		or UserInputService:IsKeyDown(Enum.KeyCode.A)
+		or UserInputService:IsKeyDown(Enum.KeyCode.S)
+		or UserInputService:IsKeyDown(Enum.KeyCode.D)
+		or UserInputService:IsKeyDown(Enum.KeyCode.Up)
+		or UserInputService:IsKeyDown(Enum.KeyCode.Down)
+
+	if not (hasShift and isMoving) then
+		return false
+	end
+
+	return true
+end
+
+-- ============================================================================
+-- 5. EXPLOSIVE 15-STUD HIGH-SPEED JETPACK BURST
+-- ============================================================================
+local function performJetpackBurst()
+	if not canPerformBurst() or not activeChar or not activeHum or not activeHRP then return end
+
+	-- Determine burst direction along horizontal movement direction (or character facing direction)
+	local moveDir = activeHum.MoveDirection
+	local flatDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+	if flatDir.Magnitude < 0.05 then
+		local look = activeHRP.CFrame.LookVector
+		flatDir = Vector3.new(look.X, 0, look.Z)
+	end
+	if flatDir.Magnitude < 0.05 then return end
+	flatDir = flatDir.Unit
+
+	isBursting = true
+	lastBurstTime = os.clock()
+	currentEnergy = math.max(0, currentEnergy - JETPACK_ENERGY_COST)
+
+	print(string.format("[Movement][Jetpack] 🚀 Explosive Jetpack Burst! Dir: (%.2f, 0, %.2f), Energy: %d%%",
+		flatDir.X, flatDir.Z, math.floor(currentEnergy)))
+
+	-- Turn character forward along burst direction (keeping upright)
+	activeHRP.CFrame = CFrame.lookAt(activeHRP.Position, activeHRP.Position + flatDir)
+
+	-- Wall / Obstacle Collision Pre-check: prevent passing through walls
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = { activeChar }
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local maxDistance = JETPACK_BURST_DISTANCE
+	local wallRay = Workspace:Raycast(activeHRP.Position, flatDir * (JETPACK_BURST_DISTANCE + 1.2), rayParams)
+	if wallRay then
+		maxDistance = math.max(0, wallRay.Distance - 1.2)
+	end
+
+	local estimatedDuration = math.clamp(maxDistance / JETPACK_BURST_SPEED, 0.12, 0.25)
+
+	-- Emit visuals (White Backside Trail + Dual Engine Trails + Exhaust) & notify server
+	emitJetpackVisuals(activeChar, estimatedDuration, true)
+	if JetpackBurstEvent then
+		JetpackBurstEvent:FireServer(flatDir)
+	end
+
+	if maxDistance < 0.5 then
+		-- Pressed directly against wall: abort movement safely without clipping
+		isBursting = false
+		syncMovementTracks()
+		return
+	end
+
+	-- BOOST WalkSpeed and apply high-force LinearVelocity so character accelerates massively!
+	activeHum.WalkSpeed = JETPACK_BURST_SPEED
+
+	local burstAtt = Instance.new("Attachment")
+	burstAtt.Name = "JetpackBurstAttachment"
+	burstAtt.Position = Vector3.zero
+	burstAtt.Parent = activeHRP
+
+	local burstVel = Instance.new("LinearVelocity")
+	burstVel.Name = "JetpackBurstVelocity"
+	burstVel.Attachment0 = burstAtt
+	burstVel.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	burstVel.RelativeTo = Enum.ActuatorRelativeTo.World
+	burstVel.ForceLimitsEnabled = true
+	burstVel.MaxAxesForce = Vector3.new(2000000, 0, 2000000) -- Massive horizontal propulsion, 0 vertical force!
+	burstVel.VectorVelocity = flatDir * JETPACK_BURST_SPEED
+	burstVel.Parent = activeHRP
+
+	-- Initial kick
+	activeHRP.AssemblyLinearVelocity = Vector3.new(flatDir.X * JETPACK_BURST_SPEED, activeHRP.AssemblyLinearVelocity.Y, flatDir.Z * JETPACK_BURST_SPEED)
+
+	local burstStart = os.clock()
+	local startPos = activeHRP.Position
+	local maxTimeout = 0.30 -- Hard safety timeout
+
+	-- Frame-by-frame precision distance tracker: exactly 15 studs!
+	while true do
+		RunService.Heartbeat:Wait()
+		if not activeHRP or not activeHum or activeHum.Health <= 0 then break end
+
+		local currentPos = activeHRP.Position
+		local horizontalDist = ((currentPos - startPos) * Vector3.new(1, 0, 1)).Magnitude
+		if horizontalDist >= maxDistance then
+			break
+		end
+
+		if (os.clock() - burstStart) >= maxTimeout then
+			break
+		end
+
+		local aheadRay = Workspace:Raycast(currentPos, flatDir * 1.5, rayParams)
+		if aheadRay and aheadRay.Distance < 1.0 then
+			break
+		end
+	end
+
+	local finalPos = activeHRP and activeHRP.Position or startPos
+	local totalTraveled = ((finalPos - startPos) * Vector3.new(1, 0, 1)).Magnitude
+	print(string.format("[Movement][Jetpack] 🏁 Burst complete! Traveled: %.2f studs (Target: %.1f, Speed: %.1f)",
+		totalTraveled, maxDistance, JETPACK_BURST_SPEED))
+
+	-- Cleanup physics controller
+	burstVel:Destroy()
+	burstAtt:Destroy()
+
+	-- Seamlessly restore normal movement / sprint speed
+	if activeHRP and activeHum and activeHum.Health > 0 then
+		local hasShift = isHoldingShift
+			or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+		local normalSpeed = hasShift and SPRINT_WALK_SPEED or BASE_WALK_SPEED
+		activeHum.WalkSpeed = normalSpeed
+
+		local yVel = activeHRP.AssemblyLinearVelocity.Y
+		activeHRP.AssemblyLinearVelocity = Vector3.new(flatDir.X * normalSpeed, yVel, flatDir.Z * normalSpeed)
+	end
+
+	isBursting = false
 	syncMovementTracks()
 end
 
 -- ============================================================================
--- 5. CHARACTER SETUP & GAME-2 HP RESET FIX
+-- 6. CHARACTER SETUP & GAME-2 HP RESET FIX
 -- ============================================================================
 local function bindCameraToHumanoid(hum: Humanoid)
 	local cam = Workspace.CurrentCamera
@@ -779,11 +886,10 @@ local function setupCharacter(character: Model)
 	activeHum = character:WaitForChild("Humanoid") :: Humanoid
 	activeHRP = character:WaitForChild("HumanoidRootPart") :: BasePart
 
-	isDiving = false
+	isBursting = false
 	currentEnergy = MAX_ENERGY
 	lastMovementState = "None"
 
-	-- 0. CAMERA TRACKING: Guarantee camera follows the active character seamlessly
 	bindCameraToHumanoid(activeHum)
 
 	task.spawn(function()
@@ -803,20 +909,16 @@ local function setupCharacter(character: Model)
 	print(string.format("[Movement][Init] 👤 Setting up character: %s | RigType: %s", character.Name, rigType.Name))
 
 	if rigType == Enum.HumanoidRigType.R6 then
-		currentWalkAnimId  = R6_WALK_ANIM_ID
-		currentRunAnimId   = R6_RUN_ANIM_ID
-		currentDiveAnimId  = R6_DIVE_ANIM_ID
-		currentGetupAnimId = R6_GETUP_ANIM_ID
-		print(string.format("[Movement][Init] ✅ R6 Avatar detected! Loading custom animations:\n  • Walk: %s\n  • Run: %s\n  • Dive: %s\n  • Getup: %s", currentWalkAnimId, currentRunAnimId, currentDiveAnimId, currentGetupAnimId))
+		currentWalkAnimId = R6_WALK_ANIM_ID
+		currentRunAnimId  = R6_RUN_ANIM_ID
+		print(string.format("[Movement][Init] ✅ R6 Avatar detected! Loading custom animations:\n  • Walk: %s\n  • Run: %s", currentWalkAnimId, currentRunAnimId))
 	else
-		currentWalkAnimId  = R15_WALK_ANIM_ID
-		currentRunAnimId   = R15_RUN_ANIM_ID
-		currentDiveAnimId  = R15_DIVE_ANIM_ID
-		currentGetupAnimId = R15_GETUP_ANIM_ID
-		warn(string.format("[Movement][Init] ⚠️ R15 Avatar detected! Loaded R15 animations:\n  • Walk: %s\n  • Run: %s\n  • Dive: %s\n  • Getup: %s", currentWalkAnimId, currentRunAnimId, currentDiveAnimId, currentGetupAnimId))
+		currentWalkAnimId = R15_WALK_ANIM_ID
+		currentRunAnimId  = R15_RUN_ANIM_ID
+		warn(string.format("[Movement][Init] ⚠️ R15 Avatar detected! Loaded R15-compatible animations:\n  • Walk: %s\n  • Run: %s", currentWalkAnimId, currentRunAnimId))
 	end
 
-	-- 1. Disable default Roblox 'Animate' script's walk/run interference on R6
+	-- Disable default Roblox 'Animate' script's walk/run interference on R6
 	local animateScript = character:WaitForChild("Animate", 3)
 	if animateScript and animateScript:IsA("LocalScript") then
 		for _, folderName in ipairs({ "walk", "run" }) do
@@ -833,28 +935,20 @@ local function setupCharacter(character: Model)
 
 	local animator = activeHum:WaitForChild("Animator", 5) :: Animator
 	if animator then
-		-- 2. Stop any lingering default movement tracks on the Animator
 		for _, playingTrack in ipairs(animator:GetPlayingAnimationTracks()) do
 			if playingTrack.Priority == Enum.AnimationPriority.Movement or playingTrack.Priority == Enum.AnimationPriority.Core then
 				playingTrack:Stop(0)
 			end
 		end
 
-		-- 3. Create & Preload Custom Animations so Length is NEVER 0.00s
 		local walkAnim = Instance.new("Animation")
 		walkAnim.AnimationId = currentWalkAnimId
 
 		local runAnim = Instance.new("Animation")
 		runAnim.AnimationId = currentRunAnimId
 
-		local diveAnim = Instance.new("Animation")
-		diveAnim.AnimationId = currentDiveAnimId
-
-		local getupAnim = Instance.new("Animation")
-		getupAnim.AnimationId = currentGetupAnimId
-
 		pcall(function()
-			ContentProvider:PreloadAsync({ walkAnim, runAnim, diveAnim, getupAnim })
+			ContentProvider:PreloadAsync({ walkAnim, runAnim })
 		end)
 
 		walkTrack = animator:LoadAnimation(walkAnim)
@@ -865,25 +959,14 @@ local function setupCharacter(character: Model)
 		runTrack.Priority = Enum.AnimationPriority.Action
 		runTrack.Looped = true
 
-		diveTrack = animator:LoadAnimation(diveAnim)
-		diveTrack.Priority = Enum.AnimationPriority.Action4
-		diveTrack.Looped = false
-
-		getupTrack = animator:LoadAnimation(getupAnim)
-		getupTrack.Priority = Enum.AnimationPriority.Action4
-		getupTrack.Looped = false
-
-		-- Yield in loop until all 4 track lengths are strictly > 0s (up to 5s timeout)
 		local loadStart = os.clock()
-		while (walkTrack.Length <= 0 or runTrack.Length <= 0 or diveTrack.Length <= 0 or getupTrack.Length <= 0) and (os.clock() - loadStart < 5.0) do
+		while (walkTrack.Length <= 0 or runTrack.Length <= 0) and (os.clock() - loadStart < 5.0) do
 			task.wait(0.05)
 		end
 
-		print(string.format("[Movement][Init] 🎬 Tracks loaded on Animator:\n  • WalkTrack: Length=%.2fs, Priority=%s, Looped=%s\n  • RunTrack:  Length=%.2fs, Priority=%s, Looped=%s\n  • DiveTrack: Length=%.2fs, Priority=%s, Looped=%s\n  • GetupTrack: Length=%.2fs, Priority=%s, Looped=%s",
+		print(string.format("[Movement][Init] 🎬 Tracks loaded on Animator:\n  • WalkTrack: Length=%.2fs, Priority=%s, Looped=%s\n  • RunTrack:  Length=%.2fs, Priority=%s, Looped=%s",
 			walkTrack and walkTrack.Length or 0, walkTrack and walkTrack.Priority.Name or "nil", tostring(walkTrack and walkTrack.Looped),
-			runTrack and runTrack.Length or 0, runTrack and runTrack.Priority.Name or "nil", tostring(runTrack and runTrack.Looped),
-			diveTrack and diveTrack.Length or 0, diveTrack and diveTrack.Priority.Name or "nil", tostring(diveTrack and diveTrack.Looped),
-			getupTrack and getupTrack.Length or 0, getupTrack and getupTrack.Priority.Name or "nil", tostring(getupTrack and getupTrack.Looped)))
+			runTrack and runTrack.Length or 0, runTrack and runTrack.Priority.Name or "nil", tostring(runTrack and runTrack.Looped)))
 
 		-- Step 2 Completion Check: Verify Workspace Map and Ruins Door are ready on client
 		task.spawn(function()
@@ -893,8 +976,8 @@ local function setupCharacter(character: Model)
 				map:WaitForChild("GameplayArea", 8)
 			end
 
-			print(string.format("[BOOT HIERARCHY] 🎬 Step 2: Animations verified (Walk: %.2fs, Run: %.2fs, Dive: %.2fs) & map assets ready. Firing ClientLoadReadyEvent.",
-				walkTrack.Length, runTrack.Length, diveTrack.Length))
+			print(string.format("[BOOT HIERARCHY] 🎬 Step 2: Animations verified (Walk: %.2fs, Run: %.2fs) & map assets ready. Firing ClientLoadReadyEvent.",
+				walkTrack.Length, runTrack.Length))
 
 			if ClientLoadReadyEvent then
 				ClientLoadReadyEvent:FireServer()
@@ -902,7 +985,7 @@ local function setupCharacter(character: Model)
 		end)
 	end
 
-	-- Re-bind HP listener on EVERY new character/game so Game 2 never stays stuck at 0 HP!
+	-- Re-bind HP listener on EVERY new character/game
 	if healthConn then healthConn:Disconnect() end
 	updateHPDisplay(activeHum.Health, activeHum.MaxHealth)
 	updateMoneyDisplay()
@@ -921,7 +1004,6 @@ if player.Character then
 end
 player.CharacterAdded:Connect(setupCharacter)
 
--- Monitor camera to prevent camera detachment when characters are converted or respawned
 Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
 	camera = Workspace.CurrentCamera
 	if activeHum and activeHum.Parent then
@@ -964,8 +1046,30 @@ else
 end
 
 -- ============================================================================
--- 6. INPUT & WHITE ENERGY BAR LOOP
+-- 7. INPUT HANDLING & MULTIPLAYER REPLICATION
 -- ============================================================================
+-- ContextActionService binding for Space:
+-- Sinks Space when sprinting to perform Jetpack Burst (blocking normal jump).
+-- Passes Space to Roblox default controls for normal jumping when not sprinting.
+local function handleSpaceAction(actionName: string, inputState: Enum.UserInputState, inputObject: InputObject)
+	if inputState == Enum.UserInputState.Begin then
+		if canPerformBurst() then
+			print("[Movement][Input] ⌨️ Shift + Move + Space -> Triggering High-Speed Jetpack Burst!")
+			task.spawn(performJetpackBurst)
+			return Enum.ContextActionResult.Sink
+		end
+	end
+	return Enum.ContextActionResult.Pass
+end
+
+ContextActionService:BindActionAtPriority(
+	"JetpackBurstContextAction",
+	handleSpaceAction,
+	false,
+	Enum.ContextActionPriority.High.Value,
+	Enum.KeyCode.Space
+)
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
@@ -974,10 +1078,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		print(string.format("[Movement][Input] ⌨️ Shift pressed (isHoldingShift=true, Energy=%d%%, ExhaustedLockout=%s)", math.floor(currentEnergy), tostring(exhaustedLockout)))
 		syncMovementTracks()
 	elseif input.KeyCode == Enum.KeyCode.Space then
-		-- If running (holding Shift while moving), Space triggers DIVE instead of normal jump!
-		if isSprinting and not isDiving and activeHum and activeHum.MoveDirection.Magnitude > 0.1 then
-			print("[Movement][Input] ⌨️ Spacebar pressed while sprinting -> Triggering running dive!")
-			performRunningDive()
+		-- Fallback check in case ContextActionService was bypassed
+		if canPerformBurst() then
+			print("[Movement][Input] ⌨️ Spacebar fallback detected -> Triggering Jetpack Burst!")
+			task.spawn(performJetpackBurst)
 		end
 	end
 end)
@@ -990,20 +1094,29 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
+-- Replicate other players' jetpack bursts in multiplayer
+if JetpackBurstReplicatedEvent then
+	JetpackBurstReplicatedEvent.OnClientEvent:Connect(function(burstingPlayer: Player, flatDir: Vector3)
+		if burstingPlayer ~= player and burstingPlayer.Character then
+			emitJetpackVisuals(burstingPlayer.Character, 0.22, false)
+		end
+	end)
+end
+
 RunService.RenderStepped:Connect(function(dt)
 	if not activeHum or activeHum.Health <= 0 then return end
 
 	syncMovementTracks()
 
-	-- Drain White Energy while running; regenerate when walking or standing still
-	if isSprinting and not isDiving then
+	-- Drain White Energy while sprinting; regenerate when walking or standing still
+	if isSprinting and not isBursting then
 		currentEnergy = math.max(0, currentEnergy - (SPRINT_DRAIN_RATE * dt))
 		if currentEnergy <= 0 and not exhaustedLockout then
 			exhaustedLockout = true
 			print("[Movement][Energy] ⚠️ ENERGY EXHAUSTED (0%) -> Sprint lockout engaged until energy reaches 20%")
 			syncMovementTracks()
 		end
-	elseif not isDiving then
+	elseif not isBursting then
 		currentEnergy = math.min(MAX_ENERGY, currentEnergy + (ENERGY_REGEN_RATE * dt))
 		if exhaustedLockout and currentEnergy >= 20 then
 			exhaustedLockout = false
@@ -1017,4 +1130,4 @@ RunService.RenderStepped:Connect(function(dt)
 	energyLabel.Text = string.format("%d", math.floor(currentEnergy))
 end)
 
-print("[MovementDiveAndHUDClient] Initialized: Walk (90697464892050), Run (125757170550820), Dive (137603926461078) & Unified Stacked HUD.")
+print("[MovementDiveAndHUDClient] Initialized: Walk (90697464892050), Run (125757170550820), High-Speed Jetpack Burst (15-stud) & Unified Stacked HUD.")

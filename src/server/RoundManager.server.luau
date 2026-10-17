@@ -77,7 +77,7 @@ local ActiveBots = {}
 local function GetActivePlayers()
     local active = {}
     for id, data in pairs(PlayerData) do
-        if data.IsAlive and not data.IsAFK and data.ParticipationState == "Active" then
+        if data.IsAlive and data.ParticipationState == "Active" then
             table.insert(active, data)
         end
     end
@@ -88,7 +88,7 @@ local function GetActiveRealPlayers()
     local active = {}
     for _, player in ipairs(Players:GetPlayers()) do
         local data = PlayerData[player.UserId]
-        if data and data.IsAlive and not data.IsAFK and data.ParticipationState == "Active" then
+        if data and data.IsAlive and data.ParticipationState == "Active" then
             table.insert(active, player)
         end
     end
@@ -107,7 +107,7 @@ local function GetSpectatorPlayers()
     local spectators = {}
     for _, player in ipairs(Players:GetPlayers()) do
         local data = PlayerData[player.UserId]
-        if data and not data.IsAlive and not data.IsAFK and data.ParticipationState == "Eliminated" then
+        if data and not data.IsAlive and data.ParticipationState == "Eliminated" then
             table.insert(spectators, player)
         end
     end
@@ -117,14 +117,17 @@ end
 local function GetReadyEligiblePlayers()
     local ready = {}
     for _, player in ipairs(Players:GetPlayers()) do
-        local data = PlayerData[player.UserId]
-        local isAfk = player:GetAttribute("IsAFK") or (data and data.IsAFK)
-        local isClientReady = player:GetAttribute("ClientReady") == true
+        local isAfk = (player:GetAttribute("IsAFK") == true)
+        local isClientReady = (player:GetAttribute("ClientReady") == true)
+        local isR6Ready = (player:GetAttribute("R6RigReady") == true)
         local char = player.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
-        local isR6 = hum and hum.RigType == Enum.HumanoidRigType.R6
-        local isLiving = hum and hum.Health > 0
-        if not isAfk and isClientReady and isR6 and isLiving then
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local isLiving = (hum ~= nil and hum.Health > 0)
+        local isR6 = (hum ~= nil and hum.RigType == Enum.HumanoidRigType.R6)
+        local isReady = isLiving and (hrp ~= nil) and (isClientReady or isR6Ready or isR6)
+
+        if not isAfk and isReady then
             table.insert(ready, player)
         end
     end
@@ -381,10 +384,31 @@ local function InitMatch()
     RuinsDoorHandManager.ResetAllPlayersForNewGame()
     
     local startingWallet = CashAndWalletManager.STARTING_GAME_WALLET or 20
+    local eligibleToEnter = {}
+
     for _, player in ipairs(Players:GetPlayers()) do
-        local existing = PlayerData[player.UserId]
-        local isAfk = (existing ~= nil) and existing.IsAFK or false
-        local partState = isAfk and "AFK" or "WaitingInLobby"
+        -- AFK IS EVALUATED ONLY HERE: AT GAME START BEFORE TAKING PLAYERS TO THE GAME AREA!
+        local isAfk = (player:GetAttribute("IsAFK") == true)
+        local isClientReady = (player:GetAttribute("ClientReady") == true)
+        local isR6Ready = (player:GetAttribute("R6RigReady") == true)
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local isLiving = (hum ~= nil and hum.Health > 0)
+        local isR6 = (hum ~= nil and hum.RigType == Enum.HumanoidRigType.R6)
+        local isReady = isLiving and (hrp ~= nil) and (isClientReady or isR6Ready or isR6)
+
+        local admittedToGame = (not isAfk) and isReady
+        local partState
+        if isAfk then
+            partState = "AFK"
+        elseif admittedToGame then
+            partState = "Active"
+            table.insert(eligibleToEnter, player)
+        else
+            partState = "WaitingInLobby"
+        end
+
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
@@ -403,16 +427,23 @@ local function InitMatch()
         player:SetAttribute("Wallet", startingWallet)
         player:SetAttribute("Health", GameConfig.MaxHealth)
         player:SetAttribute("HP", GameConfig.MaxHealth)
+        player:SetAttribute("IsInGame", partState == "Active")
+
+        if partState ~= "Active" then
+            TeleportToLobby(player)
+        end
     end
     
     SetupCompanionBots(10)
-    CashAndWalletManager.StartGameForPlayers(GetReadyEligiblePlayers())
+    CashAndWalletManager.StartGameForPlayers(eligibleToEnter)
     SyncAllStats()
     ClearWinnerGlow()
 end
 
 local function RunMatch(session)
     InitMatch()
+    local matchStartTime = os.clock()
+    local matchEliminations = {}
     
     while MatchActive do
         if session ~= CurrentRoundSession then
@@ -422,39 +453,130 @@ local function RunMatch(session)
         
         CurrentRound = CurrentRound + 1
         
-        -- Safely admit all eligible waiting players into this active round!
-        for _, player in ipairs(Players:GetPlayers()) do
-            local data = PlayerData[player.UserId]
-            if data and not data.IsAFK and data.IsAlive then
-                data.ParticipationState = "Active"
-                SyncStats(player)
-            end
-        end
+        -- Bots remain active if alive
         for _, bot in ipairs(ActiveBots) do
             if bot.IsAlive then
                 bot.ParticipationState = "Active"
             end
         end
         
+        -- Sync stats for current round
+        SyncAllStats()
+        
         local living = GetActivePlayers()
         
         -- Check Sole Survivor / Win condition
         if #living <= 1 then
             local winner = living[1]
-            local winName = winner and winner.Name or "No One"
-            print("[ROUND MANAGER] Match Ended! Sole Survivor: " .. winName)
+            local winRealName = winner and winner.Name or "No One"
+            local winDisplayName = winRealName
+            if winner then
+                if winner.DisplayName then
+                    winDisplayName = winner.DisplayName
+                elseif not winner.IsBot and winner.UserId and winner.UserId > 0 then
+                    local pObj = Players:GetPlayerByUserId(winner.UserId)
+                    if pObj then
+                        winDisplayName = pObj.DisplayName
+                        winRealName = pObj.Name
+                    end
+                end
+            end
+            local totalDuration = math.max(1, math.floor(os.clock() - matchStartTime))
+            print("[ROUND MANAGER] Match Ended! Sole Survivor: " .. winDisplayName .. " (" .. winRealName .. ")")
             CashAndWalletManager.EndGameAndRewardSurvivors()
-            BroadcastState("MatchOver", 6, { Winner = winName })
+            BroadcastState("MatchOver", 8, { Winner = winDisplayName, WinnerRealName = winRealName })
+
+            local podium = {}
+            if winner then
+                table.insert(podium, {
+                    Rank = 1,
+                    UserId = winner.UserId or 1,
+                    Name = winRealName,
+                    DisplayName = winDisplayName,
+                    SurvivalTime = totalDuration,
+                    IsBot = winner.IsBot == true,
+                })
+            else
+                table.insert(podium, {
+                    Rank = 1,
+                    UserId = 1,
+                    Name = winRealName,
+                    DisplayName = winDisplayName,
+                    SurvivalTime = totalDuration,
+                    IsBot = false,
+                })
+            end
+
+            -- Rank 2 (last eliminated before winner)
+            if #matchEliminations >= 1 then
+                local p2 = matchEliminations[#matchEliminations]
+                local p2Disp = p2.DisplayName or p2.Name or "RunnerUp"
+                if not p2.IsBot and p2.UserId and p2.UserId > 0 then
+                    local pObj = Players:GetPlayerByUserId(p2.UserId)
+                    if pObj then p2Disp = pObj.DisplayName end
+                end
+                table.insert(podium, {
+                    Rank = 2,
+                    UserId = p2.UserId or 1,
+                    Name = p2.Name or "RunnerUp",
+                    DisplayName = p2Disp,
+                    SurvivalTime = p2.SurvivalTime or math.max(1, totalDuration - 12),
+                    IsBot = p2.IsBot == true,
+                })
+            else
+                table.insert(podium, {
+                    Rank = 2,
+                    UserId = 1,
+                    Name = "RunnerUp",
+                    DisplayName = "RunnerUp",
+                    SurvivalTime = math.max(1, totalDuration - 12),
+                    IsBot = true,
+                })
+            end
+
+            -- Rank 3 (second-to-last eliminated)
+            if #matchEliminations >= 2 then
+                local p3 = matchEliminations[#matchEliminations - 1]
+                local p3Disp = p3.DisplayName or p3.Name or "Contender"
+                if not p3.IsBot and p3.UserId and p3.UserId > 0 then
+                    local pObj = Players:GetPlayerByUserId(p3.UserId)
+                    if pObj then p3Disp = pObj.DisplayName end
+                end
+                table.insert(podium, {
+                    Rank = 3,
+                    UserId = p3.UserId or 2,
+                    Name = p3.Name or "Contender",
+                    DisplayName = p3Disp,
+                    SurvivalTime = p3.SurvivalTime or math.max(1, totalDuration - 25),
+                    IsBot = p3.IsBot == true,
+                })
+            else
+                table.insert(podium, {
+                    Rank = 3,
+                    UserId = 2,
+                    Name = "Contender",
+                    DisplayName = "Contender",
+                    SurvivalTime = math.max(1, totalDuration - 25),
+                    IsBot = true,
+                })
+            end
+
             MatchOver:FireAllClients({
-                Winner = winName,
-                RoundsSurvived = CurrentRound - 1
+                Winner = winDisplayName,
+                WinnerRealName = winRealName,
+                RoundsSurvived = CurrentRound - 1,
+                TotalDuration = totalDuration,
+                Podium = podium,
             })
-            task.wait(6)
+            task.wait(8)
             for _, p in ipairs(Players:GetPlayers()) do
                 TeleportToLobby(p)
+                p:SetAttribute("IsInGame", false)
                 local pData = PlayerData[p.UserId]
-                if pData and not pData.IsAFK then
-                    pData.ParticipationState = "WaitingInLobby"
+                if pData then
+                    local isAfk = (p:GetAttribute("IsAFK") == true)
+                    pData.IsAFK = isAfk
+                    pData.ParticipationState = isAfk and "AFK" or "WaitingInLobby"
                     SyncStats(p)
                 end
             end
@@ -500,38 +622,7 @@ local function RunMatch(session)
         })
         task.wait(spawnDuration)
         print(string.format("[ROUND] HammerReveal END elapsed=%.2f", os.clock() - p1Start))
-        
-        ------------------------------------------------------------------------
-        -- PHASE 2: ANONYMOUS VOTE (From Round 2+ if spectators exist)
-        ------------------------------------------------------------------------
-        ExposedPlayerId = nil
-        local spectators = GetSpectatorPlayers()
-        if CurrentRound >= 2 and #spectators > 0 and #living >= 2 then
-            local voteDuration = GameConfig.VoteTime or 7.0
-            print(string.format("[ROUND] AnonymousVote START duration=%.1f", voteDuration))
-            local p2Start = os.clock()
-            for _, d in pairs(PlayerData) do d.Votes = 0 end
-            BroadcastState("Phase2_Vote", voteDuration, { Candidates = living })
-            PromptVote:FireAllClients({ Duration = voteDuration, Candidates = living })
-            task.wait(voteDuration)
-            
-            local topVotes = 0
-            local targetId = nil
-            local tie = false
-            for _, d in ipairs(living) do
-                if d.Votes > topVotes then
-                    topVotes = d.Votes
-                    targetId = d.UserId
-                    tie = false
-                elseif d.Votes == topVotes and topVotes > 0 then
-                    tie = true
-                end
-            end
-            if not tie and targetId then
-                ExposedPlayerId = targetId
-            end
-            print(string.format("[ROUND] AnonymousVote END elapsed=%.2f", os.clock() - p2Start))
-        end
+        task.wait(1.5) -- 1.5s delay before bidding phase begins
         
         ------------------------------------------------------------------------
         -- PHASE 3: BID FOR SURVIVAL (Exactly 10 Seconds)
@@ -561,6 +652,7 @@ local function RunMatch(session)
         -- Strictly enforce the full 10-second duration even if all players bid early!
         task.wait(bidDuration)
         print(string.format("[ROUND] Bidding END elapsed=%.2f", os.clock() - PhaseStartTime))
+        task.wait(1.5) -- 1.5s delay between phases
         
         ------------------------------------------------------------------------
         -- PHASE 4: REVEAL THE RANKINGS & APPLY NEON GREEN SHIELD GLOW
@@ -585,9 +677,19 @@ local function RunMatch(session)
         local bottomBidders = {}
         
         for i, d in ipairs(living) do
+            local pName = d.Name
+            local pDisp = d.DisplayName or d.Name
+            if not d.IsBot and d.UserId and d.UserId > 0 then
+                local realP = Players:GetPlayerByUserId(d.UserId)
+                if realP then
+                    pName = realP.Name
+                    pDisp = realP.DisplayName
+                end
+            end
             local bidderInfo = {
                 UserId = d.UserId,
-                Name = d.Name,
+                Name = pName,
+                DisplayName = pDisp,
                 CurrentBid = d.CurrentBid,
                 SubmitTime = d.SubmitTime or 10.00,
                 IsBot = d.IsBot,
@@ -626,6 +728,7 @@ local function RunMatch(session)
         })
         task.wait(revealDuration)
         print(string.format("[ROUND] Rankings END elapsed=%.2f", os.clock() - p4Start))
+        task.wait(1.5) -- 1.5s delay between phases
         
         ------------------------------------------------------------------------
         -- PHASE 5: THE SURVIVAL STANCE & RUINS DOOR HAZARD SMASH (9s)
@@ -683,6 +786,7 @@ local function RunMatch(session)
         
         ClearWinnerGlow()
         print(string.format("[ROUND] SurvivalStance & Smash END elapsed=%.2f", os.clock() - p5Start))
+        task.wait(1.5) -- 1.5s delay between phases
         
         ------------------------------------------------------------------------
         -- PHASE 7: SETTLEMENT & ELIMINATIONS (4 Seconds)
@@ -693,7 +797,7 @@ local function RunMatch(session)
         
         for _, bInfo in ipairs(topBidders) do
             local realData = PlayerData[bInfo.UserId]
-            if realData and not realData.IsAFK and realData.ParticipationState == "Active" then
+            if realData and realData.ParticipationState == "Active" then
                 if realData.IsBot then
                     realData.Money = math.max(0, math.floor((realData.Money - realData.CurrentBid) * 100) / 100)
                 end
@@ -722,10 +826,19 @@ local function RunMatch(session)
             if d.Health <= 0 and d.IsAlive then
                 d.IsAlive = false
                 d.ParticipationState = "Eliminated"
+                local survTime = math.max(1, math.floor(os.clock() - matchStartTime))
+                table.insert(matchEliminations, {
+                    UserId = d.UserId or 1,
+                    Name = d.Name or "Player",
+                    DisplayName = d.DisplayName or d.Name or "Player",
+                    SurvivalTime = survTime,
+                    IsBot = d.IsBot == true,
+                })
                 table.insert(elims, d.Name .. " (Eliminated)")
                 if not d.IsBot then
                     local p = Players:GetPlayerByUserId(d.UserId)
                     if p then
+                        p:SetAttribute("IsInGame", false)
                         CashAndWalletManager.SettlePlayerGameCash(p, "Eliminated")
                         TeleportToLobby(p)
                     end
@@ -745,6 +858,7 @@ local function RunMatch(session)
         BroadcastState("Phase7_Settlement", settlementDuration, { Eliminations = elims })
         task.wait(settlementDuration)
         print(string.format("[ROUND] Settlement END elapsed=%.2f", os.clock() - p7Start))
+        task.wait(1.5) -- 1.5s delay before next round begins
     end
 end
 
@@ -754,7 +868,7 @@ end
 
 BidSubmitted.OnServerEvent:Connect(function(player, amount)
     local data = PlayerData[player.UserId]
-    if data and data.IsAlive and not data.IsAFK and data.ParticipationState == "Active" and CurrentPhase == "Phase3_Bid" then
+    if data and data.IsAlive and data.ParticipationState == "Active" and CurrentPhase == "Phase3_Bid" then
         if data.SubmitTime ~= nil then
             return -- Only first valid bid is accepted
         end
@@ -769,23 +883,15 @@ BidSubmitted.OnServerEvent:Connect(function(player, amount)
         data.Wallet = data.Money
         local elapsed = math.max(0.01, os.clock() - PhaseStartTime)
         data.SubmitTime = math.floor(elapsed * 100) / 100
-        print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs (Wallet remaining: $%d)", player.Name, data.CurrentBid, data.SubmitTime, player:GetAttribute("Wallet") or 0))
+        print(string.format("[ROUND MANAGER] %s placed bid: $%.2f in %.2fs (Wallet remaining: $%.2f)", player.Name, data.CurrentBid, data.SubmitTime, player:GetAttribute("Wallet") or 0))
     else
-        warn(string.format("[SECURITY] Rejected bid from inactive/AFK player %s", player.Name))
+        warn(string.format("[SECURITY] Rejected bid from inactive/eliminated player %s", player.Name))
     end
 end)
 
-VoteSubmitted.OnServerEvent:Connect(function(player, targetUserId)
-    local data = PlayerData[player.UserId]
-    if data and not data.IsAlive and not data.IsAFK and data.ParticipationState == "Eliminated" and CurrentPhase == "Phase2_Vote" then
-        local target = PlayerData[targetUserId]
-        if target and target.IsAlive and target.ParticipationState == "Active" then
-            target.Votes = target.Votes + 1
-        end
-    end
-end)
+-- Dead player vote sabotage removed per requirements
 
--- AFK toggle listener (Default is OFF upon joining; players toggle between ON/OFF)
+-- AFK toggle listener (Stores preference; evaluated ONLY when next game starts before taking players to game area)
 SetAFK.OnServerEvent:Connect(function(player, isAfk)
     local data = PlayerData[player.UserId]
     if not data then
@@ -796,26 +902,18 @@ SetAFK.OnServerEvent:Connect(function(player, isAfk)
     
     local wantAfk = (isAfk == true)
     data.IsAFK = wantAfk
+    player:SetAttribute("IsAFK", wantAfk)
     
-    if wantAfk then
-        data.ParticipationState = "AFK"
-        -- Clear any active round artifacts
-        data.CurrentBid = 0
-        data.SubmitTime = nil
-        if player.Character then
-            local hl = player.Character:FindFirstChild("SafeBidGlow")
-            if hl then hl:Destroy() end
-        end
-        TeleportToLobby(player)
-        print(string.format("[ROUND MANAGER] %s enabled AFK (removed from active round, moved to lobby)", player.Name))
+    -- ONLY update participation state if player is NOT in an active game
+    if data.ParticipationState ~= "Active" then
+        data.ParticipationState = wantAfk and "AFK" or "WaitingInLobby"
+        SyncStats(player)
+        print(string.format("[ROUND MANAGER] %s updated lobby AFK state to %s", player.Name, tostring(wantAfk)))
     else
-        -- Switched to AFK: OFF
-        -- Keep player safely in the lobby until the next eligible round admits them
-        data.ParticipationState = "WaitingInLobby"
-        TeleportToLobby(player)
-        print(string.format("[ROUND MANAGER] %s turned AFK OFF (waiting in lobby for next eligible round)", player.Name))
+        -- Player is actively playing in the game area.
+        -- Specifications: Just store the value and consider only when next game starts!
+        print(string.format("[ROUND MANAGER] %s toggled AFK = %s in game area (stored for next game; current active gameplay unaffected)", player.Name, tostring(wantAfk)))
     end
-    SyncStats(player)
 end)
 
 GetGameState.OnServerInvoke = function(player)
@@ -832,6 +930,7 @@ end
 
 local function InitPlayer(player)
     if not PlayerData[player.UserId] then
+        local isAfk = (player:GetAttribute("IsAFK") == true)
         PlayerData[player.UserId] = {
             UserId = player.UserId,
             Name = player.DisplayName,
@@ -839,8 +938,8 @@ local function InitPlayer(player)
             Wallet = CashAndWalletManager.STARTING_GAME_WALLET or 20,
             Health = GameConfig.MaxHealth,
             IsAlive = true,
-            IsAFK = false, -- Default OFF as requested
-            ParticipationState = "WaitingInLobby",
+            IsAFK = isAfk,
+            ParticipationState = isAfk and "AFK" or "WaitingInLobby",
             CurrentBid = 0,
             Votes = 0,
             IsBot = false,
@@ -851,13 +950,14 @@ local function InitPlayer(player)
     player.CharacterAdded:Connect(function(char)
         task.wait(0.5)
         local data = PlayerData[player.UserId]
-        if not data or data.IsAFK or data.ParticipationState ~= "Active" then
+        if not data or data.ParticipationState ~= "Active" then
             TeleportToLobby(player)
         else
             -- Active player respawned after death
             data.Health = 0
             data.IsAlive = false
             data.ParticipationState = "Eliminated"
+            player:SetAttribute("IsInGame", false)
             CashAndWalletManager.SettlePlayerGameCash(player, "Eliminated")
             SyncStats(player)
             TeleportToLobby(player)
@@ -866,7 +966,10 @@ local function InitPlayer(player)
     if player.Character then
         task.spawn(function()
             task.wait(0.5)
-            TeleportToLobby(player)
+            local data = PlayerData[player.UserId]
+            if not data or data.ParticipationState ~= "Active" then
+                TeleportToLobby(player)
+            end
         end)
     end
     SyncStats(player)
